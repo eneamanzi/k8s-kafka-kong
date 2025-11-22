@@ -1,37 +1,3 @@
-# from flask import Flask, request, jsonify
-# from kafka import KafkaProducer
-# import json, os
-
-# KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092")
-# TOPIC = "student-events"
-
-# producer = KafkaProducer(
-#     bootstrap_servers=KAFKA_BOOTSTRAP,
-#     value_serializer=lambda v: json.dumps(v).encode("utf-8")
-# )
-
-# app = Flask(__name__)
-
-# # Contatore eventi per metriche
-# event_count = 0
-
-# @app.route("/event", methods=["POST"])
-# def handle_event():
-#     global event_count
-#     data = request.json
-#     producer.send(TOPIC, value=data)
-#     producer.flush()
-#     event_count += 1
-#     return jsonify({"status": "ok"}), 200
-
-# @app.route("/metrics", methods=["GET"])
-# def metrics():
-#     return jsonify({"events_received": event_count}), 200
-
-# if __name__ == "__main__":
-#     app.run(host="0.0.0.0", port=5000)
-
-
 from flask import Flask, request, jsonify
 from kafka import KafkaProducer
 import json, os, uuid

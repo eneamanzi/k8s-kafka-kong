@@ -11,60 +11,6 @@ CMD ["python", "consumer.py"]
 
 ------------------
 --- consumer.py ---
-# # from kafka import KafkaConsumer
-# # import json, os
-
-# # KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092")
-# # TOPIC = "student-events"
-
-# # consumer = KafkaConsumer(
-# #     TOPIC,
-# #     bootstrap_servers=KAFKA_BOOTSTRAP,
-# #     auto_offset_reset='earliest',  # legge dall'inizio se non ci sono commit
-# #     group_id='student-events-group',         # nuovo gruppo, così rilegge tutto
-# #     value_deserializer=lambda v: json.loads(v.decode('utf-8'))
-# # )
-
-# # print("Consumer avviato, in ascolto su topic:", TOPIC)
-# # for message in consumer:
-# #     print(f"Evento ricevuto: {message.value}", flush=True)
-
-# from kafka import KafkaConsumer
-# import json, os
-# from pymongo import MongoClient
-# from datetime import datetime
-
-# KAFKA_BOOTSTRAP = os.getenv(
-#     "KAFKA_BOOTSTRAP", 
-#     "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"
-# )
-# TOPIC = "student-events"
-
-# # Connessione MongoDB
-# MONGO_URI = os.getenv(
-#     "MONGO_URI", 
-#     "mongodb://user:password@mongo-mongodb.mongo.svc.cluster.local:27017/student_events"
-# )
-# client = MongoClient(MONGO_URI)
-# db = client.student_events
-# collection = db.events
-
-# consumer = KafkaConsumer(
-#     TOPIC,
-#     bootstrap_servers=KAFKA_BOOTSTRAP,
-#     auto_offset_reset='earliest',
-#     group_id='db-consumer-group',
-#     value_deserializer=lambda v: json.loads(v.decode('utf-8'))
-# )
-
-# print("Consumer avviato, in ascolto su topic:", TOPIC)
-# for message in consumer:
-#     event = message.value
-#     # aggiungo timestamp locale per tracciamento ingest
-#     event["_ingest_ts"] = datetime.utcnow()
-#     collection.insert_one(event)
-#     print(f"Evento salvato su DB: {event}", flush=True)
-
 from kafka import KafkaConsumer
 from pymongo import MongoClient
 from datetime import datetime
@@ -227,28 +173,6 @@ spec:
 
 -----------------------------
 --- metrics-ingress.yaml ---
-# apiVersion: networking.k8s.io/v1
-# kind: Ingress
-# metadata:
-#   name: metrics-ingress
-#   namespace: metrics
-#   annotations:
-#     #konghq.com/strip-path: "true"
-# spec:
-#   ingressClassName: kong
-#   rules:
-#     - host: metrics.local
-#       http:
-#         paths:
-#           - path: /metrics
-#             pathType: Prefix
-#             backend:
-#               service:
-#                 name: metrics-service
-#                 port:
-#                   number: 5001
-
-
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -760,40 +684,6 @@ kafka-python
 flask
 ------------------------
 --- producer.py ---
-# from flask import Flask, request, jsonify
-# from kafka import KafkaProducer
-# import json, os
-
-# KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092")
-# TOPIC = "student-events"
-
-# producer = KafkaProducer(
-#     bootstrap_servers=KAFKA_BOOTSTRAP,
-#     value_serializer=lambda v: json.dumps(v).encode("utf-8")
-# )
-
-# app = Flask(__name__)
-
-# # Contatore eventi per metriche
-# event_count = 0
-
-# @app.route("/event", methods=["POST"])
-# def handle_event():
-#     global event_count
-#     data = request.json
-#     producer.send(TOPIC, value=data)
-#     producer.flush()
-#     event_count += 1
-#     return jsonify({"status": "ok"}), 200
-
-# @app.route("/metrics", methods=["GET"])
-# def metrics():
-#     return jsonify({"events_received": event_count}), 200
-
-# if __name__ == "__main__":
-#     app.run(host="0.0.0.0", port=5000)
-
-
 from flask import Flask, request, jsonify
 from kafka import KafkaProducer
 import json, os, uuid
