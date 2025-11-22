@@ -1,0 +1,74 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: controller
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: uni-it-cluster
+spec:
+  replicas: 2 #per HA Assicura che i metadati del cluster (gestiti da Kraft) siano disponibili anche se 1 controller su 3 fallisce.
+  roles:
+    - controller
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 5Gi
+        kraftMetadata: shared
+        deleteClaim: false
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: broker
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: uni-it-cluster
+spec:
+  replicas: 2 #per HA Consente ai client di connettersi ad altri broker se uno fallisce.
+  roles:
+    - broker
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 5Gi
+        kraftMetadata: shared
+        deleteClaim: false
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: uni-it-cluster
+  namespace: kafka
+spec:
+  kafka:
+    version: 4.1.0
+    metadataVersion: 4.1-IV1
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+        authentication:
+          type: scram-sha-512
+    config:
+    #Garantisce che 3 copie di ogni partizione esistano e che almeno 2 siano sincronizzate. Se 1 broker fallisce, la scrittura può continuare verso le 2 rimanenti senza perdere dati.
+      # Aumenta il fattore di replicazione a 3
+      offsets.topic.replication.factor: 2
+      transaction.state.log.replication.factor: 2
+      default.replication.factor: 2 # Fattore di replicazione per i nuovi topic
+      
+      # Minimo di In-Sync Replicas (HA/Durabilità)
+      # Il valore di 2 significa che 1 replica può fallire e il sistema resta disponibile (3-1=2)
+      transaction.state.log.min.isr: 1 
+      min.insync.replicas: 1
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}

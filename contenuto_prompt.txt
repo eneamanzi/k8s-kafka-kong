@@ -1,0 +1,912 @@
+
+===== Cartella Consumer =====
+--- Dockerfile ---
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY consumer.py requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+CMD ["python", "consumer.py"]
+
+------------------
+--- consumer.py ---
+# # from kafka import KafkaConsumer
+# # import json, os
+
+# # KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092")
+# # TOPIC = "student-events"
+
+# # consumer = KafkaConsumer(
+# #     TOPIC,
+# #     bootstrap_servers=KAFKA_BOOTSTRAP,
+# #     auto_offset_reset='earliest',  # legge dall'inizio se non ci sono commit
+# #     group_id='student-events-group',         # nuovo gruppo, così rilegge tutto
+# #     value_deserializer=lambda v: json.loads(v.decode('utf-8'))
+# # )
+
+# # print("Consumer avviato, in ascolto su topic:", TOPIC)
+# # for message in consumer:
+# #     print(f"Evento ricevuto: {message.value}", flush=True)
+
+# from kafka import KafkaConsumer
+# import json, os
+# from pymongo import MongoClient
+# from datetime import datetime
+
+# KAFKA_BOOTSTRAP = os.getenv(
+#     "KAFKA_BOOTSTRAP", 
+#     "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"
+# )
+# TOPIC = "student-events"
+
+# # Connessione MongoDB
+# MONGO_URI = os.getenv(
+#     "MONGO_URI", 
+#     "mongodb://user:password@mongo-mongodb.mongo.svc.cluster.local:27017/student_events"
+# )
+# client = MongoClient(MONGO_URI)
+# db = client.student_events
+# collection = db.events
+
+# consumer = KafkaConsumer(
+#     TOPIC,
+#     bootstrap_servers=KAFKA_BOOTSTRAP,
+#     auto_offset_reset='earliest',
+#     group_id='db-consumer-group',
+#     value_deserializer=lambda v: json.loads(v.decode('utf-8'))
+# )
+
+# print("Consumer avviato, in ascolto su topic:", TOPIC)
+# for message in consumer:
+#     event = message.value
+#     # aggiungo timestamp locale per tracciamento ingest
+#     event["_ingest_ts"] = datetime.utcnow()
+#     collection.insert_one(event)
+#     print(f"Evento salvato su DB: {event}", flush=True)
+
+from kafka import KafkaConsumer
+from pymongo import MongoClient
+from datetime import datetime
+import json, os
+
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP")
+SASL_USERNAME = os.getenv("SASL_USERNAME")
+SASL_PASSWORD = os.getenv("SASL_PASSWORD")
+KAFKA_CA = "/etc/ssl/certs/kafka/ca.crt"
+
+TOPIC = "student-events"
+
+MONGO_URI = os.environ["MONGO_URI"]
+client = MongoClient(MONGO_URI)
+db = client.student_events
+collection = db.events
+
+def handle_login(event):
+    print(f"[LOGIN] Utente {event.get('user_id')} ha effettuato l'accesso.", flush=True)
+    event["_ingest_ts"] = datetime.utcnow()
+    collection.insert_one(event)
+
+def handle_quiz_submission(event):
+    print(f"[QUIZ] Utente {event.get('user_id')} ha inviato quiz {event.get('quiz_id')} con punteggio {event.get('score')}.", flush=True)
+    event["_ingest_ts"] = datetime.utcnow()
+    collection.insert_one(event)
+
+def handle_material_download(event):
+    print(f"[DOWNLOAD] Utente {event.get('user_id')} ha scaricato materiale {event.get('materiale_id')}.", flush=True)
+    event["_ingest_ts"] = datetime.utcnow()
+    collection.insert_one(event)
+
+def handle_exam_booking(event):
+    print(f"[ESAME] Utente {event.get('user_id')} ha prenotato esame {event.get('esame_id')}.", flush=True)
+    event["_ingest_ts"] = datetime.utcnow()
+    collection.insert_one(event)
+
+def handle_unknown(event):
+    print(f"[IGNOTO] Tipo evento non riconosciuto: {event.get('type')}", flush=True)
+    event["_ingest_ts"] = datetime.utcnow()
+    collection.insert_one(event)
+
+consumer = KafkaConsumer(
+    TOPIC,
+    bootstrap_servers=KAFKA_BOOTSTRAP,
+    security_protocol="SASL_SSL",
+    sasl_mechanism="SCRAM-SHA-512",
+    sasl_plain_username=SASL_USERNAME,
+    sasl_plain_password=SASL_PASSWORD,
+    ssl_cafile=KAFKA_CA,
+    auto_offset_reset='earliest',
+    group_id='db-consumer-group',
+    value_deserializer=lambda v: json.loads(v.decode('utf-8'))
+)
+
+
+print("✅ Consumer avviato, in ascolto su topic:", TOPIC, flush=True)
+for message in consumer:
+    event = message.value
+    event["_ingest_ts"] = datetime.utcnow()
+    
+    event_type = event.get("type")
+    match event_type:
+        case "login":
+            handle_login(event)
+        case "quiz_submission":
+            handle_quiz_submission(event)
+        case "download_materiale":
+            handle_material_download(event)
+        case "prenotazione_esame":
+            handle_exam_booking(event)
+        case _:
+            handle_unknown(event)
+
+-------------------
+--- requirements.txt ---
+kafka-python
+pymongo
+------------------------
+===== FINE Cartella Consumer =====
+
+===== Cartella K8s =====
+--- consumer-deployment.yaml ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consumer
+  namespace: kafka
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: consumer
+  template:
+    metadata:
+      labels:
+        app: consumer
+    spec:
+      containers:
+      - name: consumer
+        image: consumer:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: KAFKA_BOOTSTRAP
+          value: "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093"
+        - name: SASL_USERNAME
+          value: "consumer-user"   # <── Username fisso
+        - name: SASL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: consumer-user
+              key: password         # <── solo password dal Secret
+        - name: KAFKA_CA
+          value: "/etc/ssl/certs/kafka/ca.crt"
+        - name: MONGO_URI
+          valueFrom:
+            secretKeyRef:
+              name: mongo-creds
+              key: MONGO_URI
+          #value: "mongodb://appuser:appuserpass@mongo-mongodb.kafka.svc.cluster.local:27017/student_events?authSource=student_events"
+        volumeMounts:
+        - name: kafka-ca
+          mountPath: /etc/ssl/certs/kafka
+          readOnly: true
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+      volumes:
+      - name: kafka-ca
+        secret:
+          secretName: kafka-ca-cert
+
+--------------------------------
+--- producer-ingress.yaml ---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: producer-ingress
+  namespace: kafka
+  annotations:
+    konghq.com/plugins: jwt-auth  #ABILITA AUTENTICAZIONE CON JWT
+    #konghq.com/strip-path: "true"
+spec:
+  ingressClassName: kong  
+  rules:
+  - host: producer.192.168.49.2.nip.io
+    http:
+      paths:
+        - path: /event
+          pathType: Prefix
+          backend:
+            service:
+              name: producer-service
+              port:
+                number: 5000
+
+-----------------------------
+--- metrics-ingress.yaml ---
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: metrics-ingress
+#   namespace: metrics
+#   annotations:
+#     #konghq.com/strip-path: "true"
+# spec:
+#   ingressClassName: kong
+#   rules:
+#     - host: metrics.local
+#       http:
+#         paths:
+#           - path: /metrics
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: metrics-service
+#                 port:
+#                   number: 5001
+
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: metrics-ingress
+  namespace: metrics
+  annotations:
+    konghq.com/plugins: jwt-auth  #ABILITA AUTENTICAZIONE CON JWT
+    #konghq.com/strip-path: "true"
+spec:
+  ingressClassName: kong
+  rules:
+    - host: metrics.192.168.49.2.nip.io
+      http:
+        paths:
+          - path: /metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: metrics-service
+                port:
+                  number: 5001
+----------------------------
+--- jwt-plugin-kafka.yaml ---
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: jwt-auth
+  namespace: kafka
+plugin: jwt
+config:
+  claims_to_verify:
+    - exp
+
+-----------------------------
+--- jwt-plugin-metrics.yaml ---
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: jwt-auth
+  namespace: metrics
+plugin: jwt
+config:
+  claims_to_verify:
+    - exp
+
+-------------------------------
+--- jwt-credential.yaml ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: exam-client-jwt
+  namespace: kafka
+  labels:
+    konghq.com/credential: jwt    # Label fondamentale per il discovery di Kong
+stringData:
+  congig: | #KEY: valore che useremo come iss nel token; secret → chiave condivisa per firmare/verificare il token
+    {
+      "key": "exam-client-key",   
+      "secret": "supersecret",
+      "algorithm": "HS256"
+    }
+  konsumerRef: exam-client
+
+
+---------------------------
+--- kafka-cluster.yaml ---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: controller
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: uni-it-cluster
+spec:
+  replicas: 2 #per HA Assicura che i metadati del cluster (gestiti da Kraft) siano disponibili anche se 1 controller su 3 fallisce.
+  roles:
+    - controller
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 5Gi
+        kraftMetadata: shared
+        deleteClaim: false
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: broker
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: uni-it-cluster
+spec:
+  replicas: 2 #per HA Consente ai client di connettersi ad altri broker se uno fallisce.
+  roles:
+    - broker
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 5Gi
+        kraftMetadata: shared
+        deleteClaim: false
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: uni-it-cluster
+  namespace: kafka
+spec:
+  kafka:
+    version: 4.1.0
+    metadataVersion: 4.1-IV1
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+        authentication:
+          type: scram-sha-512
+    config:
+    #Garantisce che 3 copie di ogni partizione esistano e che almeno 2 siano sincronizzate. Se 1 broker fallisce, la scrittura può continuare verso le 2 rimanenti senza perdere dati.
+      # Aumenta il fattore di replicazione a 3
+      offsets.topic.replication.factor: 2
+      transaction.state.log.replication.factor: 2
+      default.replication.factor: 2 # Fattore di replicazione per i nuovi topic
+      
+      # Minimo di In-Sync Replicas (HA/Durabilità)
+      # Il valore di 2 significa che 1 replica può fallire e il sistema resta disponibile (3-1=2)
+      transaction.state.log.min.isr: 1 
+      min.insync.replicas: 1
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}
+
+--------------------------
+--- hpa.yaml ---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: producer-hpa
+  namespace: kafka
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: producer
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50   # scala sopra il 50% di CPU media
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: consumer-hpa
+  namespace: kafka
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: consumer
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: metrics-service-hpa
+  namespace: metrics
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: metrics-service
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+
+----------------
+--- kafka-users.yaml ---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: producer-user
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: uni-it-cluster
+spec:
+  authentication:
+    type: scram-sha-512
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: consumer-user
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: uni-it-cluster
+spec:
+  authentication:
+    type: scram-sha-512
+------------------------
+--- metrics-deployment.yaml ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metrics-service
+  namespace: metrics
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metrics-service
+  template:
+    metadata:
+      labels:
+        app: metrics-service
+    spec:
+      containers:
+      - name: metrics-service
+        image: metrics-service:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: MONGO_URI
+          valueFrom:
+            secretKeyRef:
+              name: mongo-creds
+              key: MONGO_URI
+          #value: "mongodb://appuser:appuserpass@mongo-mongodb.kafka.svc.cluster.local:27017/student_events?authSource=student_events"
+        ports:
+        - containerPort: 5001
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: metrics-service
+  namespace: metrics
+spec:
+  selector:
+    app: metrics-service
+  ports:
+    - protocol: TCP
+      port: 5001
+      targetPort: 5001
+  type: ClusterIP
+
+-------------------------------
+--- producer-deployment.yaml ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer
+  namespace: kafka
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: producer
+  template:
+    metadata:
+      labels:
+        app: producer
+    spec:
+      containers:
+      - name: producer
+        image: producer:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: KAFKA_BOOTSTRAP
+          value: "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093"
+        - name: SASL_USERNAME
+          value: "producer-user"   # <── Username fisso
+        - name: SASL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: producer-user
+              key: password         # <── solo password dal Secret
+        - name: KAFKA_CA
+          value: "/etc/ssl/certs/kafka/ca.crt"
+        ports:
+        - containerPort: 5000
+        volumeMounts:
+        - name: kafka-ca
+          mountPath: /etc/ssl/certs/kafka
+          readOnly: true
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+      volumes:
+      - name: kafka-ca
+        secret:
+          secretName: kafka-ca-cert
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: producer-service
+  namespace: kafka
+spec:
+  selector:
+    app: producer
+  ports:
+  - protocol: TCP
+    port: 5000
+    targetPort: 5000
+  type: ClusterIP
+
+--------------------------------
+--- kafka-topic.yaml ---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: student-events
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: uni-it-cluster
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000   # 7 giorni
+    segment.bytes: 1073741824 # 1GB per segment
+------------------------
+--- jwt-consumer.yaml ---
+apiVersion: configuration.konghq.com/v1
+kind: KongConsumer
+metadata:
+  name: exam-client
+  namespace: kafka
+  annotations:
+    kubernetes.io/ingress.class: kong
+username: exam-client
+credentials:
+  - exam-client-jwt
+-------------------------
+===== FINE Cartella K8s =====
+
+===== Cartella Metrics-service =====
+--- metrics_service.py ---
+from flask import Flask, jsonify
+from pymongo import MongoClient
+from datetime import datetime, timedelta
+import os
+
+app = Flask(__name__)
+
+# 🔗 Connessione a MongoDB
+MONGO_URI = os.environ["MONGO_URI"]
+client = MongoClient(MONGO_URI)
+db = client.student_events
+collection = db.events
+
+# ✅ Test di connessione (solo log)
+try:
+    client.admin.command('ping')
+    print("✅ Connected to MongoDB")
+except Exception as e:
+    print(f"❌ MongoDB connection error: {e}")
+
+# 🧠 1. Totale logins
+@app.route("/metrics/logins", methods=["GET"])
+def total_logins():
+    count = collection.count_documents({"type": "login"})
+    return jsonify({"total_logins": count})
+
+# 📆 2. Media logins per utente
+@app.route("/metrics/logins/average", methods=["GET"])
+def avg_logins_per_user():
+    pipeline = [
+        {"$match": {"type": "login"}},
+        {"$group": {"_id": "$user_id", "count": {"$sum": 1}}},
+        {"$group": {"_id": None, "average_logins": {"$avg": "$count"}}}
+    ]
+    result = list(collection.aggregate(pipeline))
+    return jsonify(result[0] if result else {"average_logins": 0})
+
+# 🧮 3. Tasso di successo dei quiz
+@app.route("/metrics/quiz/success-rate", methods=["GET"])
+def quiz_success_rate():
+    pipeline = [
+        {"$match": {"type": "quiz_submission"}},
+        {"$group": {
+            "_id": None,
+            "total": {"$sum": 1},
+            "success": {"$sum": {"$cond": [{"$gte": ["$score", 18]}, 1, 0]}}
+        }},
+        {"$project": {"_id": 0, "success_rate": {"$multiply": [{"$divide": ["$success", "$total"]}, 100]}}}
+    ]
+    result = list(collection.aggregate(pipeline))
+    return jsonify(result[0] if result else {"success_rate": 0})
+
+# 🕒 4. Attività ultimi 7 giorni
+@app.route("/metrics/activity/last7days", methods=["GET"])
+def activity_trend():
+    since = datetime.utcnow() - timedelta(days=7)
+    pipeline = [
+        {"$match": {"_ingest_ts": {"$gte": since}}},
+        {"$group": {"_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$_ingest_ts"}}, "count": {"$sum": 1}}},
+        {"$sort": {"_id": 1}}
+    ]
+    result = list(collection.aggregate(pipeline))
+    return jsonify(result)
+
+# 📚 5. Media punteggi per corso
+@app.route("/metrics/quiz/average-score", methods=["GET"])
+def avg_score_per_course():
+    pipeline = [
+        {"$match": {"type": "quiz_submission"}},
+        {"$group": {"_id": "$course_id", "average_score": {"$avg": "$score"}}}
+    ]
+    result = list(collection.aggregate(pipeline))
+    return jsonify(result)
+
+# 💾 6. Download per materiale
+@app.route("/metrics/downloads", methods=["GET"])
+def downloads():
+    pipeline = [
+        {"$match": {"type": "download_materiale"}},
+        {"$group": {"_id": "$materiale_id", "downloads": {"$sum": 1}}}
+    ]
+    result = list(collection.aggregate(pipeline))
+    return jsonify(result)
+
+# 🧾 7. Prenotazioni esami per corso
+@app.route("/metrics/exams", methods=["GET"])
+def exams():
+    pipeline = [
+        {"$match": {"type": "prenotazione_esame"}},
+        {"$group": {"_id": "$course_id", "prenotazioni": {"$sum": 1}}}
+    ]
+    result = list(collection.aggregate(pipeline))
+    return jsonify(result)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5001)
+
+--------------------------
+--- Dockerfile ---
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY metrics_service.py requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+CMD ["python", "metrics_service.py"]
+
+------------------
+--- requirements.txt ---
+flask
+pymongo
+------------------------
+===== FINE Cartella Metrics-service =====
+
+===== Cartella Producer =====
+--- Dockerfile ---
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY producer.py requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+EXPOSE 5000
+
+CMD ["python", "producer.py"]
+
+------------------
+--- requirements.txt ---
+kafka-python
+flask
+------------------------
+--- producer.py ---
+# from flask import Flask, request, jsonify
+# from kafka import KafkaProducer
+# import json, os
+
+# KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092")
+# TOPIC = "student-events"
+
+# producer = KafkaProducer(
+#     bootstrap_servers=KAFKA_BOOTSTRAP,
+#     value_serializer=lambda v: json.dumps(v).encode("utf-8")
+# )
+
+# app = Flask(__name__)
+
+# # Contatore eventi per metriche
+# event_count = 0
+
+# @app.route("/event", methods=["POST"])
+# def handle_event():
+#     global event_count
+#     data = request.json
+#     producer.send(TOPIC, value=data)
+#     producer.flush()
+#     event_count += 1
+#     return jsonify({"status": "ok"}), 200
+
+# @app.route("/metrics", methods=["GET"])
+# def metrics():
+#     return jsonify({"events_received": event_count}), 200
+
+# if __name__ == "__main__":
+#     app.run(host="0.0.0.0", port=5000)
+
+
+from flask import Flask, request, jsonify
+from kafka import KafkaProducer
+import json, os, uuid
+from datetime import datetime
+
+app = Flask(__name__)
+
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP")
+SASL_USERNAME = os.getenv("SASL_USERNAME")
+SASL_PASSWORD = os.getenv("SASL_PASSWORD")
+KAFKA_CA = os.getenv("KAFKA_CA", "/etc/ssl/certs/kafka/ca.crt")
+
+TOPIC = "student-events"
+
+# Kafka secure producer
+producer = KafkaProducer(
+    bootstrap_servers=KAFKA_BOOTSTRAP,
+    security_protocol="SASL_SSL",
+    sasl_mechanism="SCRAM-SHA-512",
+    sasl_plain_username=SASL_USERNAME,
+    sasl_plain_password=SASL_PASSWORD,
+    ssl_cafile=KAFKA_CA,
+    value_serializer=lambda v: json.dumps(v).encode("utf-8")
+)
+
+
+# 🔢 Contatori per monitoraggio locale
+event_count = {
+    "login": 0,
+    "quiz_submission": 0,
+    "download_materiale": 0,
+    "prenotazione_esame": 0
+}
+
+def produce_event(event_type: str, payload: dict):
+    """Crea un evento completo e lo invia a Kafka"""
+    event = {
+        "event_id": str(uuid.uuid4()),
+        "type": event_type,
+        "timestamp": datetime.utcnow().isoformat(),
+        **payload
+    }
+    producer.send(TOPIC, value=event)
+    producer.flush()
+    event_count[event_type] += 1
+    print(f"[PRODUCER] Evento inviato: {event_type} -> {event}", flush=True)
+    return event
+
+# 🎓 LOGIN EVENT
+@app.route("/event/login", methods=["POST"])
+def produce_login():
+    data = request.json or {}
+    required = ["user_id"]
+    if not all(k in data for k in required):
+        return jsonify({"error": "Missing required field: user_id"}), 400
+
+    event = produce_event("login", {"user_id": data["user_id"]})
+    return jsonify({"status": "ok", "event": event}), 200
+
+# 🧮 QUIZ SUBMISSION
+@app.route("/event/quiz", methods=["POST"])
+def produce_quiz():
+    data = request.json or {}
+    required = ["user_id", "quiz_id", "course_id", "score"]
+    if not all(k in data for k in required):
+        return jsonify({"error": f"Missing required fields: {required}"}), 400
+
+    event = produce_event("quiz_submission", {
+        "user_id": data["user_id"],
+        "quiz_id": data["quiz_id"],
+        "course_id": data["course_id"],
+        "score": data["score"]
+    })
+    return jsonify({"status": "ok", "event": event}), 200
+
+# 📚 DOWNLOAD MATERIALE
+@app.route("/event/download", methods=["POST"])
+def produce_download():
+    data = request.json or {}
+    required = ["user_id", "materiale_id", "course_id"]
+    if not all(k in data for k in required):
+        return jsonify({"error": f"Missing required fields: {required}"}), 400
+
+    event = produce_event("download_materiale", {
+        "user_id": data["user_id"],
+        "materiale_id": data["materiale_id"],
+        "course_id": data["course_id"]
+    })
+    return jsonify({"status": "ok", "event": event}), 200
+
+# 🧾 PRENOTAZIONE ESAME
+@app.route("/event/exam", methods=["POST"])
+def produce_exam():
+    data = request.json or {}
+    required = ["user_id", "esame_id", "course_id"]
+    if not all(k in data for k in required):
+        return jsonify({"error": f"Missing required fields: {required}"}), 400
+
+    event = produce_event("prenotazione_esame", {
+        "user_id": data["user_id"],
+        "esame_id": data["esame_id"],
+        "course_id": data["course_id"]
+    })
+    return jsonify({"status": "ok", "event": event}), 200
+
+# 📊 METRICHE LOCALI
+@app.route("/metrics", methods=["GET"])
+def metrics():
+    total = sum(event_count.values())
+    return jsonify({"events_sent": total, "breakdown": event_count}), 200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
+
+-------------------
+===== FINE Cartella Producer =====

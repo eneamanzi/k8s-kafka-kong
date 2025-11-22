@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer
+  namespace: kafka
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: producer
+  template:
+    metadata:
+      labels:
+        app: producer
+    spec:
+      containers:
+      - name: producer
+        image: producer:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: KAFKA_BOOTSTRAP
+          value: "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093"
+        - name: SASL_USERNAME
+          value: "producer-user"   # <── Username fisso
+        - name: SASL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: producer-user
+              key: password         # <── solo password dal Secret
+        - name: KAFKA_CA
+          value: "/etc/ssl/certs/kafka/ca.crt"
+        ports:
+        - containerPort: 5000
+        volumeMounts:
+        - name: kafka-ca
+          mountPath: /etc/ssl/certs/kafka
+          readOnly: true
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+      volumes:
+      - name: kafka-ca
+        secret:
+          secretName: kafka-ca-cert
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: producer-service
+  namespace: kafka
+spec:
+  selector:
+    app: producer
+  ports:
+  - protocol: TCP
+    port: 5000
+    targetPort: 5000
+  type: ClusterIP
