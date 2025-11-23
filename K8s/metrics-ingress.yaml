@@ -9,7 +9,7 @@ metadata:
 spec:
   ingressClassName: kong
   rules:
-    - host: metrics.192.168.49.2.nip.io
+    - host: metrics.192.168.58.2.nip.io
       http:
         paths:
           - path: /metrics

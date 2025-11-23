@@ -5,89 +5,70 @@ import os
 
 app = Flask(__name__)
 
-# 🔗 Connessione a MongoDB
 MONGO_URI = os.environ["MONGO_URI"]
 client = MongoClient(MONGO_URI)
-db = client.student_events
-collection = db.events
+db = client.iot_network       
+collection = db.sensor_data   
 
-# ✅ Test di connessione (solo log)
+# Test di connessione
 try:
     client.admin.command('ping')
-    print("✅ Connected to MongoDB")
+    print("Connected to MongoDB (IoT Network)")
 except Exception as e:
-    print(f"❌ MongoDB connection error: {e}")
+    print(f"MongoDB connection error: {e}")
 
-# 🧠 1. Totale logins
-@app.route("/metrics/logins", methods=["GET"])
-def total_logins():
-    count = collection.count_documents({"type": "login"})
-    return jsonify({"total_logins": count})
+# 1. Totale Avvii (Boot Events)
+@app.route("/metrics/boots", methods=["GET"])
+def total_boots():
+    count = collection.count_documents({"type": "boot"})
+    return jsonify({"total_device_boots": count})
 
-# 📆 2. Media logins per utente
-@app.route("/metrics/logins/average", methods=["GET"])
-def avg_logins_per_user():
+# 2. Media Temperatura per Zona
+@app.route("/metrics/temperature/average-by-zone", methods=["GET"])
+def avg_temp_per_zone():
     pipeline = [
-        {"$match": {"type": "login"}},
-        {"$group": {"_id": "$user_id", "count": {"$sum": 1}}},
-        {"$group": {"_id": None, "average_logins": {"$avg": "$count"}}}
-    ]
-    result = list(collection.aggregate(pipeline))
-    return jsonify(result[0] if result else {"average_logins": 0})
-
-# 🧮 3. Tasso di successo dei quiz
-@app.route("/metrics/quiz/success-rate", methods=["GET"])
-def quiz_success_rate():
-    pipeline = [
-        {"$match": {"type": "quiz_submission"}},
+        {"$match": {"type": "telemetry"}},
         {"$group": {
-            "_id": None,
-            "total": {"$sum": 1},
-            "success": {"$sum": {"$cond": [{"$gte": ["$score", 18]}, 1, 0]}}
-        }},
-        {"$project": {"_id": 0, "success_rate": {"$multiply": [{"$divide": ["$success", "$total"]}, 100]}}}
+            "_id": "$zone_id", 
+            "avg_temp": {"$avg": "$temperature"},
+            "avg_hum": {"$avg": "$humidity"},
+            "samples": {"$sum": 1}
+        }}
     ]
     result = list(collection.aggregate(pipeline))
-    return jsonify(result[0] if result else {"success_rate": 0})
+    return jsonify(result)
 
-# 🕒 4. Attività ultimi 7 giorni
+# 3. Conta Allarmi Critici
+@app.route("/metrics/alerts", methods=["GET"])
+def critical_alerts():
+    pipeline = [
+        {"$match": {"type": "alert"}},
+        {"$group": {"_id": "$severity", "count": {"$sum": 1}}}
+    ]
+    result = list(collection.aggregate(pipeline))
+    return jsonify(result)
+
+# 4. Trend Attività ultimi 7 giorni
 @app.route("/metrics/activity/last7days", methods=["GET"])
 def activity_trend():
     since = datetime.utcnow() - timedelta(days=7)
     pipeline = [
         {"$match": {"_ingest_ts": {"$gte": since}}},
-        {"$group": {"_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$_ingest_ts"}}, "count": {"$sum": 1}}},
+        {"$group": {
+            "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$_ingest_ts"}}, 
+            "events_count": {"$sum": 1}
+        }},
         {"$sort": {"_id": 1}}
     ]
     result = list(collection.aggregate(pipeline))
     return jsonify(result)
 
-# 📚 5. Media punteggi per corso
-@app.route("/metrics/quiz/average-score", methods=["GET"])
-def avg_score_per_course():
+# 5. Stato Firmware
+@app.route("/metrics/firmware", methods=["GET"])
+def firmware_stats():
     pipeline = [
-        {"$match": {"type": "quiz_submission"}},
-        {"$group": {"_id": "$course_id", "average_score": {"$avg": "$score"}}}
-    ]
-    result = list(collection.aggregate(pipeline))
-    return jsonify(result)
-
-# 💾 6. Download per materiale
-@app.route("/metrics/downloads", methods=["GET"])
-def downloads():
-    pipeline = [
-        {"$match": {"type": "download_materiale"}},
-        {"$group": {"_id": "$materiale_id", "downloads": {"$sum": 1}}}
-    ]
-    result = list(collection.aggregate(pipeline))
-    return jsonify(result)
-
-# 🧾 7. Prenotazioni esami per corso
-@app.route("/metrics/exams", methods=["GET"])
-def exams():
-    pipeline = [
-        {"$match": {"type": "prenotazione_esame"}},
-        {"$group": {"_id": "$course_id", "prenotazioni": {"$sum": 1}}}
+        {"$match": {"type": "firmware_update"}},
+        {"$group": {"_id": "$update_to", "count": {"$sum": 1}}}
     ]
     result = list(collection.aggregate(pipeline))
     return jsonify(result)

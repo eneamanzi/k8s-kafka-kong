@@ -1,14 +1,15 @@
 # Progetto Kubernetes per il corso CCT
 
-Questo repository contiene il progetto per il corso di *Cloud Computing Technologies (CCT)*. L'obiettivo è implementare un'architettura a microservizi su Kubernetes che gestisca eventi tramite un flusso di dati asincrono (Kafka) e un database (MongoDB), il tutto esposto tramite un API Gateway (Kong).
+Questo repository contiene il progetto per il corso di Cloud Computing Technologies (CCT). L'obiettivo è implementare un'architettura a microservizi su Kubernetes per il monitoraggio di una rete di sensori IoT. Il sistema gestisce flussi di telemetria ad alta frequenza tramite Kafka, storicizza i dati su MongoDB ed espone metriche aggregate tramite Kong.
 
 L'architettura include:
-* **Kong**: API Gateway per l'esposizione dei servizi.
-* **Producer**: Microservizio che riceve dati via API e li pubblica su un topic Kafka.
-* **Kafka (Strimzi)**: Message broker per la comunicazione asincrona.
-* **Consumer**: Microservizio che consuma eventi da Kafka e li salva su MongoDB.
-* **MongoDB**: Database per la persistenza dei dati.
-* **Metrics-service**: Microservizio che espone metriche calcolate leggendo da MongoDB.
+
+* **Kong**: API Gateway per l'esposizione sicura (JWT) degli endpoint dei sensori.
+  * **Producer**: Microservizio di ingestione che riceve dati dai dispositivi (Boot, Telemetria, Allarmi) e li pubblica su Kafka.
+  * **Kafka (Strimzi)**: Message broker per il buffering e disaccoppiamento del flusso dati (`sensor-stream`).
+  * **Consumer**: Worker che processa gli eventi raw e li salva strutturati su MongoDB.
+  * **MongoDB**: Database NoSQL per la persistenza (`iot_network`).
+  * **Metrics-service**: Servizio di analytics che calcola medie (es. temperatura per zona) e statistiche operative.
 
 ## Indice
 - [Progetto Kubernetes per il corso CCT](#progetto-kubernetes-per-il-corso-cct)
@@ -36,10 +37,10 @@ L'architettura include:
     - [1. Setup Variabili Ambiente (IP, PORT, TOKEN)](#1-setup-variabili-ambiente-ip-port-token)
     - [2. Verifica Autenticazione (Security Check)](#2-verifica-autenticazione-security-check)
     - [3. Inviare Eventi al Producer](#3-inviare-eventi-al-producer)
-      - [3.1 Login Utenti](#31-login-utenti)
-      - [3.2 Risultati Quiz](#32-risultati-quiz)
-      - [3.3 Download Materiali](#33-download-materiali)
-      - [3.4 Prenotazione Esami](#34-prenotazione-esami)
+      - [3.1 Device Boot (Avvio Dispositivi)](#31-device-boot-avvio-dispositivi)
+      - [3.2 Telemetry Data (Invio Dati Ambientali)](#32-telemetry-data-invio-dati-ambientali)
+      - [3.3 Critical Alerts (Gestione Errori)](#33-critical-alerts-gestione-errori)
+      - [3.4 Firmware Updates (Manutenzione)](#34-firmware-updates-manutenzione)
     - [4. Leggere le Metriche (Metrics-service)](#4-leggere-le-metriche-metrics-service)
     - [5. Database Clean-up (utility)](#5-database-clean-up-utility)
   - [Non-Functional Property (NFP)](#non-functional-property-nfp)
@@ -71,16 +72,16 @@ L'architettura include:
 Il sistema implementa un pattern **Event-Driven** con API Gateway per l'autenticazione.
 
 ### Flusso di Ingestione (Scrittura)
-1.  **Client HTTP**: Invia una richiesta `POST /event/...` all'API Gateway (Kong).
+1.  **Client HTTP** (Sensore IoT): Invia una richiesta `POST /event/telemetry` (o Boot/Alert) all'API Gateway (Kong).
 2.  **Kong Gateway**: Intercetta la richiesta e verifica il token JWT nell'header `Authorization`.
     * **Token Valido**: La richiesta viene inoltrata al servizio **Producer**.
     * **Token Invalido/Assente**: Kong restituisce immediatamente `401 Unauthorized`.
-3.  **Producer**: Riceve il payload JSON, aggiunge metadati (UUID, timestamp) e pubblica il messaggio sul topic `student-events` di Kafka.
+3.  **Producer**: Riceve il payload JSON, aggiunge metadati (UUID, timestamp) e pubblica il messaggio sul topic `sensor-stream` di Kafka.
 4.  **Kafka**: Persiste il messaggio in modo distribuito e replicato.
-5.  **Consumer**: Legge il messaggio dal topic e salva il documento nella collezione `events` di **MongoDB**.
+5.  **Consumer**: Legge il messaggio dal topic e salva il documento neDB `iot_network` di **MongoDB**.
 
 ### Flusso di Analisi (Lettura)
-1.  **Client HTTP**: Invia una richiesta `GET /metrics/...` a Kong.
+1.  **Client HTTP**: Invia una richiesta `GET /metrics/temperature/average-by-zone` a Kong.
 2.  **Kong Gateway**: Esegue la validazione JWT.
 3.  **Metrics-service**: Riceve la richiesta, esegue query di aggregazione su MongoDB e restituisce le statistiche.
 
@@ -98,7 +99,10 @@ Il sistema implementa un pattern **Event-Driven** con API Gateway per l'autentic
 
 1.  **Avviare Minikube:**
     ```bash
-    minikube start
+    minikube start -p IoT-cluster
+    minikube profile IoT-cluster  #imposta il profilo come default per comandi minikube (non necessita -p)
+    minikube profile list
+    minikube addons enable metrics-server -p IoT-cluster
     ```
     *(Se ricevi un errore, aggiungi il tuo utente al gruppo docker)*:
     ```bash
@@ -108,9 +112,9 @@ Il sistema implementa un pattern **Event-Driven** con API Gateway per l'autentic
 2.  **Impostare l'ambiente Docker:**
     Per utilizzare il Docker daemon interno a Minikube (necessario per buildare le immagini che Kubernetes userà):
     ```bash
-    eval $(minikube docker-env)
+    eval $(minikube -p IoT-cluster docker-env)
     ```
-    **ATTENZIONE:** Questo comando va eseguito in *ogni terminale* che userai per buildare le immagini Docker.
+    **ATTENZIONE:** Questo comando va eseguito in *ogni terminale* che userai per buildare le immagini Docker. Sostituire con il nome del profilo minikube in esecuzione
 
 ### 1. Creazione Namespace
 
@@ -177,49 +181,42 @@ helm install mongo-mongodb bitnami/mongodb --namespace kafka --version 18.1.1
 1.  **Recupera la password di root:**
 
     ```bash
-    kubectl get secret -n kafka mongo-mongodb -o jsonpath='{.data.mongodb-root-password}' | base64 -d
+    export MONGODB_ROOT_PASSWORD=$(kubectl get secret -n kafka mongo-mongodb -o jsonpath='{.data.mongodb-root-password}' | base64 -d)
     ```
 
     *(Annota la password generata, es: `A36NCeYzH4`)*
 
-2.  **Accedi al pod di Mongo:**
+2.  **Accedi alla shell di Mongo:**
 
     ```bash
-    kubectl exec -it -n kafka $(kubectl get pods -n kafka -l app.kubernetes.io/name=mongodb -o jsonpath='{.items[0].metadata.name}') -- bash
+    kubectl exec -it deployment/mongo-mongodb -n kafka -- mongosh -u root -p $MONGODB_ROOT_PASSWORD --authenticationDatabase admin
     ```
 
-3.  **Avvia la shell Mongo e crea l'utente:**
-    Sostituisci `<PASSWORD>` con quella recuperata al punto 1.
-
-    ```bash
-    mongosh -u root -p <PASSWORD> --authenticationDatabase admin
-    ```
-
-4.  **Nel prompt di Mongo, esegui:**
+3.  **Creazione utente**
     
-    1.  Passa al database `student_events`
+    1.  Passa al database `iot_network`
         ```mongo
-        use student_events;
+        use iot_network;
         ```
     2.  Crea l'utenza che verrà usata per accedere al DB
         ```mongo
         db.createUser({
-          user: "appuser",
-          pwd: "appuserpass",
-          roles: [ { role: "readWrite", db: "student_events" } ]
+          user: "db_user",
+          pwd: "segreta",
+          roles: [ { role: "readWrite", db: "iot_network" } ]
         });
         ```
-5.  **Controllare creazione:**
+4.  **Controllare creazione:**
 
     ```mongo
-    use student_events;
+    use iot_network;
     ```
 
     ```mongo
     db.getUsers()
     ```
 
-Le applicazioni useranno questa stringa di connessione: `mongodb://appuser:appuserpass@mongo-mongodb.kafka.svc.cluster.local:27017/student_events?authSource=student_events`
+Le applicazioni useranno questa stringa di connessione: `mongodb://db_user:segreta@mongo-mongodb.kafka.svc.cluster.local:27017/iot_network?authSource=iot_network`
 
 ### 4\. Kong API Gateway
 
@@ -268,7 +265,7 @@ helm install kong kong/kong -n kong
 
 Dobbiamo buildare le immagini Docker dei nostri microservizi Python.
 
-1. **Esegui `eval $(minikube docker-env)` in questo terminale**
+1. **Esegui `eval $(minikube -p IoT-cluster  docker-env)` in questo terminale**
    
 2. **Builda le immagini**
 
@@ -295,6 +292,8 @@ docker build -t producer:latest ./Producer
 
 # Riavvia il deployment
 kubectl rollout restart deployment/producer -n kafka
+kubectl rollout restart deployment/consumer -n kafka
+kubectl rollout restart deployment/metrics-service -n metrics
 ```
 
 Per riavviare tutti i deployment in un namespace:
@@ -314,7 +313,7 @@ Il `MONGO_URI ` è stato ottenuto alla fine del configurazione di MongoDB ([3.1 
 
 
 ```bash
-MONGO_URI=mongodb://appuser:appuserpass@mongo-mongodb.kafka.svc.cluster.local:27017/student_events?authSource=student_events
+MONGO_URI=mongodb://db_user:segreta@mongo-mongodb.kafka.svc.cluster.local:27017/iot_network?authSource=iot_network
 
 kubectl create secret generic mongo-creds -n kafka --from-literal=MONGO_URI="$MONGO_URI" 
 
@@ -343,9 +342,9 @@ Prima di esporre i servizi, configuriamo l'autenticazione. Creiamo l'identità d
 > **Nota:** Questo passaggio crea un `KongConsumer` e un `Secret` Kubernetes contenente la chiave condivisa (HS256) per la firma dei token.
 
 ```bash
-kubectl apply -f ./K8s/jwt-consumer.yaml
-
 kubectl apply -f ./K8s/jwt-credential.yaml
+
+kubectl apply -f ./K8s/jwt-consumer.yaml
 ```
 </div>
 
@@ -391,7 +390,8 @@ kubectl apply -f ./K8s
 </div>
 
 ## Comandi di Test: verifica del funzionamento + utility
-Utilizzeremo `curl` e il servizio `nip.io` per risolvere i sottodomini (`producer` e `metrics`) direttamente all'IP del cluster Minikube, permettendoci di testare gli Ingress basati su host.
+Utilizzeremo  il servizio `nip.io` per risolvere i sottodomini (`producer` e `metrics`) direttamente all'IP del cluster Minikube, permettendoci di testare gli Ingress basati su host. \
+Utilizziamo `curl` per simulare il comportamento dei sensori e verificare il funzionamento della pipeline.
 
 ### 1\. Setup Variabili Ambiente (IP, PORT, TOKEN)
 Prima di iniziare, esportiamo le variabili necessarie per non dover modificare manualmente ogni comando `curl`.
@@ -456,91 +456,90 @@ Queste richieste `curl` colpiscono l'host `producer.$IP.nip.io`, che Kong instra
   kubectl logs -l app=consumer -n kafka -f
   ```
 
-#### 3.1 Login Utenti
+#### 3.1 Device Boot (Avvio Dispositivi) 
+Segnala che un sensore si è acceso ed è online.
 ```bash
-curl -i -X POST http://producer.$IP.nip.io:$PORT/event/login \
+# Sensore 1 (Magazzino A)
+curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "alice"}'
+  -d '{"device_id": "sensor-01", "zone_id": "warehouse-A", "firmware": "v2.1"}'
 
-curl -i -X POST http://producer.$IP.nip.io:$PORT/event/login \
+# Sensore 2 (Magazzino A)
+curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "bob"}'
+  -d '{"device_id": "sensor-02", "zone_id": "warehouse-A", "firmware": "v2.1"}'
 
-curl -i -X POST http://producer.$IP.nip.io:$PORT/event/login \
+# Sensore 3 (Ufficio B)
+curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "charlie"}'
+  -d '{"device_id": "sensor-03", "zone_id": "office-B", "firmware": "v1.0"}'
 ```
 
-#### 3.2 Risultati Quiz
-
+#### 3.2 Telemetry Data (Invio Dati Ambientali)
+Invio periodico di temperatura e umidità.
 ```bash
-curl -i -X POST http://producer.$IP.nip.io:$PORT/event/quiz \
+# Dati normali
+curl -i -X POST http://producer.$IP.nip.io:$PORT/event/telemetry \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "alice", "quiz_id": "math101", "score": 24, "course_id": "math"}'
+  -d '{"device_id": "sensor-01", "zone_id": "warehouse-A", "temperature": 24.5, "humidity": 45}'
 
-curl -i -X POST http://producer.$IP.nip.io:$PORT/event/quiz \
+# Picco di calore (Magazzino A)
+curl -i -X POST http://producer.$IP.nip.io:$PORT/event/telemetry \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "bob", "quiz_id": "math101", "score": 15, "course_id": "math"}'
+  -d '{"device_id": "sensor-02", "zone_id": "warehouse-A", "temperature": 32.0, "humidity": 30}'
 
-curl -i -X POST http://producer.$IP.nip.io:$PORT/event/quiz \
+# Ambiente fresco (Ufficio B)
+curl -i -X POST http://producer.$IP.nip.io:$PORT/event/telemetry \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "charlie", "quiz_id": "phys101", "score": 28, "course_id": "physics"}'
+  -d '{"device_id": "sensor-03", "zone_id": "office-B", "temperature": 21.5, "humidity": 55}'
 ```
 
-#### 3.3 Download Materiali
+#### 3.3 Critical Alerts (Gestione Errori)
+Simulazione di un guasto hardware.
 
 ```bash
-curl -i -X POST http://producer.$IP.nip.io:$PORT/event/download \
+curl -i -X POST http://producer.$IP.nip.io:$PORT/event/alert \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "alice", "materiale_id": "pdf1", "course_id": "math"}'
-
-curl -i -X POST http://producer.$IP.nip.io:$PORT/event/download \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": "bob", "materiale_id": "pdf1", "course_id": "math"}'
-
-curl -i -X POST http://producer.$IP.nip.io:$PORT/event/download \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": "charlie", "materiale_id": "pdf2", "course_id": "physics"}'
+  -d '{"device_id": "sensor-02", "error_code": "OVERHEAT_WARNING", "severity": "high"}'
 ```
 
-#### 3.4 Prenotazione Esami
-
+#### 3.4 Firmware Updates (Manutenzione)
 ```bash
-curl -i -X POST http://producer.$IP.nip.io:$PORT/event/exam \
+curl -i -X POST http://producer.$IP.nip.io:$PORT/event/firmware_update \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "alice", "esame_id": "math1", "course_id": "math"}'
-
-curl -i -X POST http://producer.$IP.nip.io:$PORT/event/exam \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": "bob", "esame_id": "phys1", "course_id": "physics"}'
+  -d '{"device_id": "sensor-03", "version_to": "v2.0"}'
 ```
+
 ### 4\. Leggere le Metriche (Metrics-service)
-Infine, interroghiamo il servizio di metriche per vedere l'aggregazione dei dati salvati su MongoDB.
+Interroghiamo il sistema per vedere i dati aggregati.
 
 Queste richieste `curl` colpiscono l'host `metrics.$IP.nip.io`, che Kong instrada al servizio `metrics-service`.
 
 ```bash
-curl -i -H "Authorization: Bearer $TOKEN" http://metrics.$IP.nip.io:$PORT/metrics/logins
+# Totale dispositivi avviati
+curl -s -H "Authorization: Bearer $TOKEN" http://metrics.$IP.nip.io:$PORT/metrics/boots | json_pp
 
-curl -i -H "Authorization: Bearer $TOKEN" http://metrics.$IP.nip.io:$PORT/metrics/quiz/success-rate
+# Media temperature per zona (Analisi)
+curl -s -H "Authorization: Bearer $TOKEN" http://metrics.$IP.nip.io:$PORT/metrics/temperature/average-by-zone | json_pp
 
-curl -i -H "Authorization: Bearer $TOKEN" http://metrics.$IP.nip.io:$PORT/metrics/quiz/average-score
-
-curl -i -H "Authorization: Bearer $TOKEN" http://metrics.$IP.nip.io:$PORT/metrics/downloads
-
-curl -i -H "Authorization: Bearer $TOKEN" http://metrics.$IP.nip.io:$PORT/metrics/exams
+# Conteggio allarmi critici
+curl -s -H "Authorization: Bearer $TOKEN" http://metrics.$IP.nip.io:$PORT/metrics/alerts | json_pp
 ```
+
+TODO mancano queste due metriche da chiamare
+last7days
+
+firmware
+
+
 ### 5\. Database Clean-up (utility)
   
 Recupero password admin dal secret di mongo
@@ -550,7 +549,7 @@ export MONGODB_ROOT_PASSWORD=$(kubectl get secret --namespace kafka mongo-mongod
 
 Trova tutte le collezioni presenti in student_events e cancella il loro contenuto una per una.
 ```bash
-kubectl exec -it deployment/mongo-mongodb -n kafka -- mongosh student_events \
+kubectl exec -it deployment/mongo-mongodb -n kafka -- mongosh iot_network \
 -u root -p $MONGODB_ROOT_PASSWORD \
 --authenticationDatabase admin \
 --eval "db.getCollectionNames().forEach(function(c){ db[c].deleteMany({}); print('Svuotata: ' + c); })"
@@ -558,7 +557,7 @@ kubectl exec -it deployment/mongo-mongodb -n kafka -- mongosh student_events \
 
 Cicla su tutte le collezioni e usa printjson per mostrare i dati formattati.
 ```bash
-kubectl exec -it deployment/mongo-mongodb -n kafka -- mongosh student_events \
+kubectl exec -it deployment/mongo-mongodb -n kafka -- mongosh iot_network \
 -u root -p $MONGODB_ROOT_PASSWORD \
 --authenticationDatabase admin \
 --eval "db.getCollectionNames().forEach(function(c){ print('\n--- Collezione: ' + c + ' ---'); printjson(db[c].find().toArray()); })"
@@ -600,9 +599,9 @@ echo "Token:  $TOKEN"
     Tenta una connessione senza credenziali per confermare che venga rifiutata, fallisce restituendo `Unauthorized`.
 
     ```bash
-    curl -X POST http://producer.$IP.nip.io:$PORT/event/login \
+    curl -X POST http://producer.$IP.nip.io:$PORT/event/boot \
       -H "Content-Type: application/json" \
-      -d '{"user_id": "test_unauthorized_user"}'
+      -d '{"device_id": "unauthorized-sensor", "zone_id": "test"}'
     ```
 
     > **Expectation:** message: `Unauthorized`.
@@ -642,10 +641,10 @@ Questo scenario simula il crash improvviso del Consumer mentre i dati continuano
 
     ```bash
     for i in {1..5}; do
-      curl -s -X POST http://producer.$IP.nip.io:$PORT/event/login \
+      curl -s -X POST http://producer.$IP.nip.io:$PORT/event/boot \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
-      -d "{\"user_id\":\"offline-msg-$i\"}" >/dev/null
+      -d "{\"device_id\":\"offline-sensor-$i\", \"zone_id\":\"buffer-test\"}" >/dev/null
     done
     ```
 
@@ -710,10 +709,10 @@ Questo test verifica la resilienza dell'infrastruttura simulando un crash improv
     # Invia una richiesta ogni 0.5s per monitorare la disponibilità
     while true; do 
       curl -s -o /dev/null -w "%{http_code} " \
-      http://producer.$IP.nip.io:$PORT/event/login \
+      http://producer.$IP.nip.io:$PORT/event/boot \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
-      -d '{"user_id":"healing-check"}'
+      -d '{"device_id":"healing-check", "zone_id":"ha-test"}'
       sleep 0.5
     done
     ```
@@ -749,10 +748,10 @@ Questo test simula uno scenario di alto carico per verificare due comportamenti 
 
     ```bash
     for i in {1..50}; do
-      curl -s -X POST http://producer.$IP.nip.io:$PORT/event/login \
+      curl -s -X POST http://producer.$IP.nip.io:$PORT/event/telemetry \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
-      -d "{\"user_id\":\"load-test-$i\"}" >/dev/null
+      -d "{\"device_id\":\"load-test-$i\", \"zone_id\":\"LB-test\", \"temperature\": 20.0, \"humidity\": 50.0}" >/dev/null
     done
     ```
 
@@ -807,10 +806,10 @@ Questo test simula uno scenario di alto carico per verificare due comportamenti 
 
     ```bash
     for i in {1..5000}; do
-    curl -s -X POST "http://producer.$IP.nip.io:$PORT/event/login" \
+    curl -s -X POST "http://producer.$IP.nip.io:$PORT/event/telemetry" \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
-      -d "{\"user_id\":\"hpa-stress-$i\"}" \
+      -d "{\"device_id\":\"stress-sensor-$i\", \"zone_id\":\"HPA-test\", \"temperature\": 50.0, \"humidity\": 10.0}" \
       > /dev/null
     done
     ```
@@ -862,10 +861,10 @@ Definiamo una risorsa `KongPlugin` che impone un limite di **5 richieste al seco
     ```bash
     for i in {1..20}; do
       curl -s -o /dev/null -w "%{http_code}\n" \
-      -X POST http://producer.$IP.nip.io:$PORT/event/login \
+      -X POST http://producer.$IP.nip.io:$PORT/event/boot \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
-      -d "{\"user_id\":\"flood-$i\"}"
+      -d "{\"device_id\":\"flood-$i\", \"zone_id\":\"DoS-test\"}"
     done
     ```
     > **Expectation:** Dopo le prime richieste (codice `200`), si ricevono risposte `429 Too Many Requests`.
