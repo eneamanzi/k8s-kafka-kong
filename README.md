@@ -147,7 +147,7 @@ kubectl create namespace kafka
     helm install strimzi-cluster-operator strimzi/strimzi-kafka-operator -n kafka
     ```
 
-2. **Deploy del Cluster Kafka** Per prima cosa, applichiamo i manifest che definiscono il Cluster, gli Utenti e i Topic di Kafka. Questo avvierà l'operator Strimzi, che creerà il cluster e genererà il secret `uni-it-cluster-cluster-ca-cert` contenente i certificati CA.
+2. **Deploy del Cluster Kafka** Per prima cosa, applichiamo i manifest che definiscono il Cluster, gli Utenti e i Topic di Kafka. Questo avvierà l'operator Strimzi, che creerà il cluster e genererà il secret `iot-sensor-cluster-cluster-ca-cert` contenente i certificati CA.
     ```bash
     kubectl apply -f ./K8s/kafka/kafka-cluster.yaml
     kubectl apply -f ./K8s/kafka/kafka-users.yaml
@@ -156,20 +156,21 @@ kubectl create namespace kafka
 
     > **Attendi che il cluster sia pronto:** affinché l'operator crei il cluster potrebbe volerci qualche minuto
     ```bash
-    kubectl wait kafka/uni-it-cluster --for=condition=Ready --timeout=300s -n kafka
+    kubectl wait kafka/iot-sensor-cluster --for=condition=Ready --timeout=300s -n kafka
     ```
-    Una volta terminato il comando precedente verifica che il secret `uni-it-cluster-cluster-ca-cert` sia stato creato con successo
+    
+    Una volta terminato il comando precedente verifica che il secret `iot-sensor-cluster-cluster-ca-cert` sia stato creato con successo
     ```bash
-    kubectl get secret uni-it-cluster-cluster-ca-cert -n kafka
+    kubectl get secret iot-sensor-cluster-cluster-ca-cert -n kafka
     ```
 
     *Kafka è configurato (tramite i file YAML in `K8s/`) per usare TLS e autenticazione SCRAM-SHA-512.*
 
-3. **Crea Secret per Kafka SSL:** Ora, creiamo il secret `kafka-ca-cert`. Questo comando legge il certificato CA dal secret generato da Strimzi (`uni-it-cluster-cluster-ca-cert`) e lo salva in un nuovo secret che i nostri pod (Producer e Consumer) useranno per comunicare via TLS con Kafka.
+3. **Crea Secret per Kafka SSL:** Ora, creiamo il secret `kafka-ca-cert`. Questo comando legge il certificato CA dal secret generato da Strimzi (`iot-sensor-cluster-cluster-ca-cert`) e lo salva in un nuovo secret che i nostri pod (Producer e Consumer) useranno per comunicare via TLS con Kafka.
 
     ```bash
     kubectl create secret generic kafka-ca-cert -n kafka \
-      --from-literal=ca.crt="$(kubectl get secret uni-it-cluster-cluster-ca-cert -n kafka -o jsonpath='{.data.ca\.crt}' | base64 -d)"
+      --from-literal=ca.crt="$(kubectl get secret iot-sensor-cluster-cluster-ca-cert -n kafka -o jsonpath='{.data.ca\.crt}' | base64 -d)"
     ```
 
 ### 3\. MongoDB
@@ -371,7 +372,7 @@ L'obiettivo è proteggere gli endpoint esposti (`producer` e `metrics`) bloccand
   * 1x `KongConsumer` (identità logica "iot-devices")
   * 2x `Secret` Kubernetes (API Key per namespace `kafka` e `metrics`)
 
-> **Nota di Produzione:** In questo progetto usiamo una **singola API Key condivisa** (`iot-sensor-key-2024-secure`) per semplicità didattica. In produzione, ogni dispositivo IoT dovrebbe avere la propria chiave univoca, generabile con `openssl rand -hex 32`.
+> **Nota di Produzione:** In questo progetto usiamo una **singola API Key condivisa** (`iot-sensor-key-prod-v1`) per semplicità didattica. In produzione, ogni dispositivo IoT dovrebbe avere la propria chiave univoca, generabile con `openssl rand -hex 32`.
 
 #### 7.1 Configurazione Key-Auth
 <div style="margin-left: 40px;">
@@ -423,7 +424,7 @@ Dovresti vedere **2 secret** (uno per kafka, uno per metrics).
 Esporta la chiave per usarla nei test:
 
 ```bash
-export API_KEY="iot-sensor-key-2024-secure"
+export API_KEY="iot-sensor-key-prod-v1"
 echo "API Key: $API_KEY"
 ```
 </div>
@@ -472,7 +473,7 @@ Prima di iniziare, esportiamo le variabili necessarie per non dover modificare m
 export IP=$(minikube ip)
 export PORT=$(minikube service kong-kong-proxy -n kong --url | head -n 1 | awk -F: '{print $3}')
 
-export API_KEY="iot-sensor-key-2024-secure"
+export API_KEY="iot-sensor-key-prod-v1"
 
 echo "Target (IP:PORT): $IP:$PORT"
 echo "API Key: $API_KEY"
@@ -635,7 +636,7 @@ Estrazione dinamica di IP e Porta del Gateway (Minikube)
 export IP=$(minikube ip)
 export PORT=$(minikube service kong-kong-proxy -n kong --url | head -n 1 | awk -F: '{print $3}')
 
-export API_KEY="iot-sensor-key-2024-secure"
+export API_KEY="iot-sensor-key-prod-v1"
 echo "Target (IP:PORT): $IP:$PORT"
 echo "API Key: $API_KEY"
 ```
@@ -648,8 +649,8 @@ echo "API Key: $API_KEY"
     Controlla che la comunicazione col broker avvenga su canale cifrato.
 
     ```bash
-    kubectl exec -it -n kafka uni-it-cluster-broker-0 -- \
-      openssl s_client -connect uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093 -brief </dev/null
+    kubectl exec -it -n kafka iot-sensor-cluster-broker-0 -- \
+      openssl s_client -connect iot-sensor-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093 -brief </dev/null
     ```
 
     > **Expectation:** Output contenente `Protocol version: TLSv1.3` e Cipher Suite robusta (es. `TLS_AES_256_GCM_SHA384`).

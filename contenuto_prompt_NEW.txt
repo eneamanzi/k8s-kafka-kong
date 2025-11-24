@@ -226,7 +226,7 @@ metadata:
   labels:
     konghq.com/credential: key-auth
 stringData:
-  key: "iot-sensor-key-2024-secure"
+  key: "iot-sensor-key-prod-v1"
   # In produzione: generare con `openssl rand -hex 32`
 ------------------------------------------------
 --- ./K8s/auth-apikey/apikey-plugin-kafka.yaml ---
@@ -250,7 +250,7 @@ metadata:
   labels:
     konghq.com/credential: key-auth
 stringData:
-  key: "iot-sensor-key-2024-secure"
+  key: "iot-sensor-key-prod-v1"
 --------------------------------------------------------
 --- ./K8s/auth-apikey/apikey-plugin-metrics.yaml ---
 apiVersion: configuration.konghq.com/v1
@@ -271,7 +271,7 @@ metadata:
   name: controller
   namespace: kafka
   labels:
-    strimzi.io/cluster: uni-it-cluster
+    strimzi.io/cluster: iot-sensor-cluster
 spec:
   replicas: 2 #per HA Assicura che i metadati del cluster (gestiti da Kraft) siano disponibili anche se 1 controller su 3 fallisce.
   roles:
@@ -291,7 +291,7 @@ metadata:
   name: broker
   namespace: kafka
   labels:
-    strimzi.io/cluster: uni-it-cluster
+    strimzi.io/cluster: iot-sensor-cluster
 spec:
   replicas: 2 #per HA Consente ai client di connettersi ad altri broker se uno fallisce.
   roles:
@@ -308,7 +308,7 @@ spec:
 apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
 metadata:
-  name: uni-it-cluster
+  name: iot-sensor-cluster
   namespace: kafka
 spec:
   kafka:
@@ -348,7 +348,7 @@ metadata:
   name: sensor-telemetry
   namespace: kafka
   labels:
-    strimzi.io/cluster: uni-it-cluster
+    strimzi.io/cluster: iot-sensor-cluster
 spec:
   partitions: 3
   replicas: 2
@@ -363,7 +363,7 @@ metadata:
   name: sensor-alerts
   namespace: kafka
   labels:
-    strimzi.io/cluster: uni-it-cluster
+    strimzi.io/cluster: iot-sensor-cluster
 spec:
   partitions: 2
   replicas: 2
@@ -379,7 +379,7 @@ metadata:
   name: producer-user
   namespace: kafka
   labels:
-    strimzi.io/cluster: uni-it-cluster
+    strimzi.io/cluster: iot-sensor-cluster
 spec:
   authentication:
     type: scram-sha-512
@@ -390,7 +390,7 @@ metadata:
   name: consumer-user
   namespace: kafka
   labels:
-    strimzi.io/cluster: uni-it-cluster
+    strimzi.io/cluster: iot-sensor-cluster
 spec:
   authentication:
     type: scram-sha-512
@@ -417,7 +417,7 @@ spec:
         imagePullPolicy: IfNotPresent
         env:
         - name: KAFKA_BOOTSTRAP
-          value: "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093"
+          value: "iot-sensor-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093"
         - name: SASL_USERNAME
           value: "consumer-user"
         - name: SASL_PASSWORD
@@ -618,7 +618,7 @@ spec:
         imagePullPolicy: IfNotPresent
         env:
         - name: KAFKA_BOOTSTRAP
-          value: "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093"
+          value: "iot-sensor-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093"
         - name: SASL_USERNAME
           value: "producer-user"
         - name: SASL_PASSWORD

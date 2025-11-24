@@ -4,7 +4,7 @@ metadata:
   name: sensor-telemetry
   namespace: kafka
   labels:
-    strimzi.io/cluster: uni-it-cluster
+    strimzi.io/cluster: iot-sensor-cluster
 spec:
   partitions: 3
   replicas: 2
@@ -19,7 +19,7 @@ metadata:
   name: sensor-alerts
   namespace: kafka
   labels:
-    strimzi.io/cluster: uni-it-cluster
+    strimzi.io/cluster: iot-sensor-cluster
 spec:
   partitions: 2
   replicas: 2

@@ -19,7 +19,7 @@ spec:
         imagePullPolicy: IfNotPresent
         env:
         - name: KAFKA_BOOTSTRAP
-          value: "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093"
+          value: "iot-sensor-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093"
         - name: SASL_USERNAME
           value: "producer-user"
         - name: SASL_PASSWORD

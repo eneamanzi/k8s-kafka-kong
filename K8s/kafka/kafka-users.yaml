@@ -4,7 +4,7 @@ metadata:
   name: producer-user
   namespace: kafka
   labels:
-    strimzi.io/cluster: uni-it-cluster
+    strimzi.io/cluster: iot-sensor-cluster
 spec:
   authentication:
     type: scram-sha-512
@@ -15,7 +15,7 @@ metadata:
   name: consumer-user
   namespace: kafka
   labels:
-    strimzi.io/cluster: uni-it-cluster
+    strimzi.io/cluster: iot-sensor-cluster
 spec:
   authentication:
     type: scram-sha-512

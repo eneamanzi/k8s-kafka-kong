@@ -4,7 +4,7 @@ metadata:
   name: controller
   namespace: kafka
   labels:
-    strimzi.io/cluster: uni-it-cluster
+    strimzi.io/cluster: iot-sensor-cluster
 spec:
   replicas: 2 #per HA Assicura che i metadati del cluster (gestiti da Kraft) siano disponibili anche se 1 controller su 3 fallisce.
   roles:
@@ -24,7 +24,7 @@ metadata:
   name: broker
   namespace: kafka
   labels:
-    strimzi.io/cluster: uni-it-cluster
+    strimzi.io/cluster: iot-sensor-cluster
 spec:
   replicas: 2 #per HA Consente ai client di connettersi ad altri broker se uno fallisce.
   roles:
@@ -41,7 +41,7 @@ spec:
 apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
 metadata:
-  name: uni-it-cluster
+  name: iot-sensor-cluster
   namespace: kafka
 spec:
   kafka:
