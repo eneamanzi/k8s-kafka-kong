@@ -21,20 +21,46 @@ spec:
         - name: KAFKA_BOOTSTRAP
           value: "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093"
         - name: SASL_USERNAME
-          value: "consumer-user"   # <── Username fisso
+          value: "consumer-user"
         - name: SASL_PASSWORD
           valueFrom:
             secretKeyRef:
               name: consumer-user
-              key: password         # <── solo password dal Secret
+              key: password
         - name: KAFKA_CA
           value: "/etc/ssl/certs/kafka/ca.crt"
-        - name: MONGO_URI
+        # MongoDB Config da ConfigMap
+        - name: MONGO_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_HOST
+        - name: MONGO_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_PORT
+        - name: MONGO_DATABASE
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_DATABASE
+        - name: MONGO_AUTH_SOURCE
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_AUTH_SOURCE
+        # MongoDB Credentials da Secret
+        - name: MONGO_USER
           valueFrom:
             secretKeyRef:
               name: mongo-creds
-              key: MONGO_URI
-          #value: "mongodb://appuser:appuserpass@mongo-mongodb.kafka.svc.cluster.local:27017/student_events?authSource=student_events"
+              key: MONGO_USER
+        - name: MONGO_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongo-creds
+              key: MONGO_PASSWORD
         volumeMounts:
         - name: kafka-ca
           mountPath: /etc/ssl/certs/kafka

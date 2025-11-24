@@ -5,10 +5,19 @@ import os
 
 app = Flask(__name__)
 
-MONGO_URI = os.environ["MONGO_URI"]
+# Configurazione MongoDB da ConfigMap e Secret
+MONGO_HOST = os.getenv("MONGO_HOST")
+MONGO_PORT = os.getenv("MONGO_PORT")
+MONGO_DATABASE = os.getenv("MONGO_DATABASE")
+MONGO_USER = os.getenv("MONGO_USER")
+MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
+MONGO_AUTH_SOURCE = os.getenv("MONGO_AUTH_SOURCE")
+
+MONGO_URI = f"mongodb://{MONGO_USER}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DATABASE}?authSource={MONGO_AUTH_SOURCE}"
+
 client = MongoClient(MONGO_URI)
-db = client.iot_network       
-collection = db.sensor_data   
+db = client[MONGO_DATABASE]
+collection = db.sensor_data
 
 # Test di connessione
 try:

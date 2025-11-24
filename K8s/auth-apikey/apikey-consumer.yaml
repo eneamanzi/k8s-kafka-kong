@@ -1,10 +1,9 @@
 apiVersion: configuration.konghq.com/v1
 kind: KongConsumer
 metadata:
-  name: exam-client
+  name: iot-devices
   namespace: kafka
   annotations:
     kubernetes.io/ingress.class: kong
-username: exam-client
-credentials:
-  - exam-client-jwt
+    konghq.com/credentials: iot-devices-apikey  # <-- AGGIUNGI QUESTA RIGA
+username: iot-devices

@@ -1,6 +1,6 @@
 
 ===== Cartella Consumer =====
---- Dockerfile ---
+--- ./Consumer/Dockerfile ---
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -8,9 +8,8 @@ COPY consumer.py requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 CMD ["python", "consumer.py"]
-
-------------------
---- consumer.py ---
+-----------------------------
+--- ./Consumer/consumer.py ---
 from kafka import KafkaConsumer
 from pymongo import MongoClient
 from datetime import datetime
@@ -22,54 +21,78 @@ SASL_USERNAME = os.getenv("SASL_USERNAME")
 SASL_PASSWORD = os.getenv("SASL_PASSWORD")
 KAFKA_CA = "/etc/ssl/certs/kafka/ca.crt"
 
-TOPIC = "sensor-stream"
+# Topic da consumare
+TOPICS = ["sensor-telemetry", "sensor-alerts"]
 
-# Configurazione MongoDB (Il Secret punta già a iot_network, ma esplicitiamo il db)
-MONGO_URI = os.environ["MONGO_URI"]
+# Configurazione MongoDB da ConfigMap e Secret
+MONGO_HOST = os.getenv("MONGO_HOST")
+MONGO_PORT = os.getenv("MONGO_PORT")
+MONGO_DATABASE = os.getenv("MONGO_DATABASE")
+MONGO_USER = os.getenv("MONGO_USER")
+MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
+MONGO_AUTH_SOURCE = os.getenv("MONGO_AUTH_SOURCE")
+
+MONGO_URI = f"mongodb://{MONGO_USER}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DATABASE}?authSource={MONGO_AUTH_SOURCE}"
+
 client = MongoClient(MONGO_URI)
-db = client.iot_network  
+db = client[MONGO_DATABASE]
 collection = db.sensor_data
 
+# Funzione helper per convertire la data
+def fix_timestamp(event):
+    if "timestamp" in event and isinstance(event["timestamp"], str):
+        try:
+            # Converte la stringa ISO 8601 in oggetto datetime
+            event["timestamp"] = datetime.fromisoformat(event["timestamp"])
+        except ValueError:
+            print(f"[WARN] Formato data non valido: {event['timestamp']}", flush=True)
+    return event
+
 def handle_boot(event):
+    event = fix_timestamp(event) # <--- Aggiungi conversione
     print(f"[BOOT] Device {event.get('device_id')} attivo in zona {event.get('zone_id')}.", flush=True)
     event["_ingest_ts"] = datetime.utcnow()
     collection.insert_one(event)
 
 def handle_telemetry(event):
+    event = fix_timestamp(event) # <--- Aggiungi conversione
     print(f"[TELEMETRY] Device {event.get('device_id')} -> Temp: {event.get('temperature')}°C, Hum: {event.get('humidity')}%", flush=True)
     event["_ingest_ts"] = datetime.utcnow()
     collection.insert_one(event)
 
 def handle_firmware_update(event):
+    event = fix_timestamp(event) # <--- Aggiungi conversione
     print(f"[UPDATE] Device {event.get('device_id')} aggiornamento a {event.get('update_to')}.", flush=True)
     event["_ingest_ts"] = datetime.utcnow()
     collection.insert_one(event)
 
 def handle_alert(event):
+    event = fix_timestamp(event) # <--- Aggiungi conversione
     print(f"[ALERT] CRITICO: Device {event.get('device_id')} Code: {event.get('error_code')}", flush=True)
     event["_ingest_ts"] = datetime.utcnow()
     collection.insert_one(event)
 
 def handle_unknown(event):
+    event = fix_timestamp(event) # <--- Aggiungi conversione
     print(f"[IGNOTO] Tipo evento non gestito: {event.get('type')}", flush=True)
     event["_ingest_ts"] = datetime.utcnow()
     collection.insert_one(event)
 
 # Inizializzazione Consumer
 consumer = KafkaConsumer(
-    TOPIC,
+    *TOPICS,  # Sottoscrivi a entrambi i topic
     bootstrap_servers=KAFKA_BOOTSTRAP,
     security_protocol="SASL_SSL",
     sasl_mechanism="SCRAM-SHA-512",
     sasl_plain_username=SASL_USERNAME,
     sasl_plain_password=SASL_PASSWORD,
     ssl_cafile=KAFKA_CA,
-    auto_offset_reset='earliest', # Legge dall'inizio 
+    auto_offset_reset='earliest',
     group_id='iot-consumer-group',
     value_deserializer=lambda v: json.loads(v.decode('utf-8'))
 )
 
-print(f"IoT Consumer avviato. In ascolto su: {TOPIC}", flush=True)
+print(f"IoT Consumer avviato. In ascolto su: {TOPICS}", flush=True)
 
 # Loop principale
 for message in consumer:
@@ -87,156 +110,161 @@ for message in consumer:
             handle_alert(event)
         case _:
             handle_unknown(event)
--------------------
---- requirements.txt ---
+------------------------------
+--- ./Consumer/requirements.txt ---
 kafka-python
 pymongo
-------------------------
+lz4
+-----------------------------------
 ===== FINE Cartella Consumer =====
 
 ===== Cartella K8s =====
---- consumer-deployment.yaml ---
-apiVersion: apps/v1
-kind: Deployment
+--- ./K8s/mongodb-config.yaml ---
+apiVersion: v1
+kind: ConfigMap
 metadata:
-  name: consumer
+  name: mongodb-config
+  namespace: kafka
+data:
+  MONGO_HOST: "mongo-mongodb.kafka.svc.cluster.local"
+  MONGO_PORT: "27017"
+  MONGO_DATABASE: "iot_network"
+  MONGO_AUTH_SOURCE: "iot_network"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mongodb-config
+  namespace: metrics
+data:
+  MONGO_HOST: "mongo-mongodb.kafka.svc.cluster.local"
+  MONGO_PORT: "27017"
+  MONGO_DATABASE: "iot_network"
+  MONGO_AUTH_SOURCE: "iot_network"
+---------------------------------
+--- ./K8s/hpa.yaml ---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: producer-hpa
   namespace: kafka
 spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: consumer
-  template:
-    metadata:
-      labels:
-        app: consumer
-    spec:
-      containers:
-      - name: consumer
-        image: consumer:latest
-        imagePullPolicy: IfNotPresent
-        env:
-        - name: KAFKA_BOOTSTRAP
-          value: "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093"
-        - name: SASL_USERNAME
-          value: "consumer-user"   # <── Username fisso
-        - name: SASL_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: consumer-user
-              key: password         # <── solo password dal Secret
-        - name: KAFKA_CA
-          value: "/etc/ssl/certs/kafka/ca.crt"
-        - name: MONGO_URI
-          valueFrom:
-            secretKeyRef:
-              name: mongo-creds
-              key: MONGO_URI
-          #value: "mongodb://appuser:appuserpass@mongo-mongodb.kafka.svc.cluster.local:27017/student_events?authSource=student_events"
-        volumeMounts:
-        - name: kafka-ca
-          mountPath: /etc/ssl/certs/kafka
-          readOnly: true
-        resources:
-          requests:
-            cpu: "100m"
-            memory: "128Mi"
-          limits:
-            cpu: "500m"
-            memory: "256Mi"
-      volumes:
-      - name: kafka-ca
-        secret:
-          secretName: kafka-ca-cert
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: producer
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50   # scala sopra il 50% di CPU media
 
---------------------------------
---- producer-ingress.yaml ---
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
 metadata:
-  name: producer-ingress
+  name: consumer-hpa
+  namespace: kafka
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: consumer
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: metrics-service-hpa
+  namespace: metrics
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: metrics-service
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+
+----------------------
+--- ./K8s/auth-apikey/apikey-consumer.yaml ---
+apiVersion: configuration.konghq.com/v1
+kind: KongConsumer
+metadata:
+  name: iot-devices
   namespace: kafka
   annotations:
-    konghq.com/plugins: jwt-auth  #ABILITA AUTENTICAZIONE CON JWT
-    #konghq.com/strip-path: "true"
-spec:
-  ingressClassName: kong  
-  rules:
-  - host: producer.192.168.58.2.nip.io
-    http:
-      paths:
-        - path: /event
-          pathType: Prefix
-          backend:
-            service:
-              name: producer-service
-              port:
-                number: 5000
-
------------------------------
---- metrics-ingress.yaml ---
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: metrics-ingress
-  namespace: metrics
-  annotations:
-    konghq.com/plugins: jwt-auth  #ABILITA AUTENTICAZIONE CON JWT
-    #konghq.com/strip-path: "true"
-spec:
-  ingressClassName: kong
-  rules:
-    - host: metrics.192.168.58.2.nip.io
-      http:
-        paths:
-          - path: /metrics
-            pathType: Prefix
-            backend:
-              service:
-                name: metrics-service
-                port:
-                  number: 5001
-----------------------------
---- jwt-plugin-kafka.yaml ---
-apiVersion: configuration.konghq.com/v1
-kind: KongPlugin
-metadata:
-  name: jwt-auth
-  namespace: kafka
-plugin: jwt
-config:
-  claims_to_verify:
-    - exp
-
------------------------------
---- jwt-plugin-metrics.yaml ---
-apiVersion: configuration.konghq.com/v1
-kind: KongPlugin
-metadata:
-  name: jwt-auth
-  namespace: metrics
-plugin: jwt
-config:
-  claims_to_verify:
-    - exp
-
--------------------------------
---- jwt-credential.yaml ---
+    kubernetes.io/ingress.class: kong
+    konghq.com/credentials: iot-devices-apikey  # <-- AGGIUNGI QUESTA RIGA
+username: iot-devices
+----------------------------------------------
+--- ./K8s/auth-apikey/apikey-credential.yaml ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: exam-client-jwt
+  name: iot-devices-apikey
   namespace: kafka
   labels:
-    konghq.com/credential: jwt    # Label fondamentale per il discovery di Kong
+    konghq.com/credential: key-auth
 stringData:
-  key: "exam-client-key"  #valore che useremo come iss nel token;
-  secret: "supersecret"   #chiave condivisa per firmare/verificare il token
-  algorithm: "HS256"
-
-
----------------------------
---- kafka-cluster.yaml ---
+  key: "iot-sensor-key-2024-secure"
+  # In produzione: generare con `openssl rand -hex 32`
+------------------------------------------------
+--- ./K8s/auth-apikey/apikey-plugin-kafka.yaml ---
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: key-auth
+  namespace: kafka
+plugin: key-auth
+config:
+  key_names:
+    - apikey
+  hide_credentials: true
+--------------------------------------------------
+--- ./K8s/auth-apikey/apikey-credential-metrics.yaml ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: iot-devices-apikey
+  namespace: metrics
+  labels:
+    konghq.com/credential: key-auth
+stringData:
+  key: "iot-sensor-key-2024-secure"
+--------------------------------------------------------
+--- ./K8s/auth-apikey/apikey-plugin-metrics.yaml ---
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: key-auth
+  namespace: metrics
+plugin: key-auth
+config:
+  key_names:
+    - apikey
+  hide_credentials: true
+----------------------------------------------------
+--- ./K8s/kafka/kafka-cluster.yaml ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaNodePool
 metadata:
@@ -312,72 +340,39 @@ spec:
     topicOperator: {}
     userOperator: {}
 
---------------------------
---- hpa.yaml ---
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
+--------------------------------------
+--- ./K8s/kafka/kafka-topics.yaml ---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
 metadata:
-  name: producer-hpa
+  name: sensor-telemetry
   namespace: kafka
+  labels:
+    strimzi.io/cluster: uni-it-cluster
 spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: producer
-  minReplicas: 1
-  maxReplicas: 4
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 50   # scala sopra il 50% di CPU media
-
+  partitions: 3
+  replicas: 2
+  config:
+    retention.ms: 604800000   # 7 giorni
+    segment.bytes: 1073741824 # 1GB
+    compression.type: lz4      # Compressione per alto volume
 ---
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
 metadata:
-  name: consumer-hpa
+  name: sensor-alerts
   namespace: kafka
+  labels:
+    strimzi.io/cluster: uni-it-cluster
 spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: consumer
-  minReplicas: 1
-  maxReplicas: 4
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 50
-
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: metrics-service-hpa
-  namespace: metrics
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: metrics-service
-  minReplicas: 1
-  maxReplicas: 4
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 50
-
-----------------
---- kafka-users.yaml ---
+  partitions: 2
+  replicas: 2
+  config:
+    retention.ms: 2592000000  # 30 giorni (più lungo per audit)
+    segment.bytes: 536870912  # 512MB
+    min.insync.replicas: 2    # Maggiore durabilità per dati critici
+-------------------------------------
+--- ./K8s/kafka/kafka-users.yaml ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:
@@ -399,8 +394,132 @@ metadata:
 spec:
   authentication:
     type: scram-sha-512
-------------------------
---- metrics-deployment.yaml ---
+------------------------------------
+--- ./K8s/micro-services/consumer-deployment.yaml ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consumer
+  namespace: kafka
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: consumer
+  template:
+    metadata:
+      labels:
+        app: consumer
+    spec:
+      containers:
+      - name: consumer
+        image: consumer:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: KAFKA_BOOTSTRAP
+          value: "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093"
+        - name: SASL_USERNAME
+          value: "consumer-user"
+        - name: SASL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: consumer-user
+              key: password
+        - name: KAFKA_CA
+          value: "/etc/ssl/certs/kafka/ca.crt"
+        # MongoDB Config da ConfigMap
+        - name: MONGO_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_HOST
+        - name: MONGO_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_PORT
+        - name: MONGO_DATABASE
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_DATABASE
+        - name: MONGO_AUTH_SOURCE
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_AUTH_SOURCE
+        # MongoDB Credentials da Secret
+        - name: MONGO_USER
+          valueFrom:
+            secretKeyRef:
+              name: mongo-creds
+              key: MONGO_USER
+        - name: MONGO_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongo-creds
+              key: MONGO_PASSWORD
+        volumeMounts:
+        - name: kafka-ca
+          mountPath: /etc/ssl/certs/kafka
+          readOnly: true
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+      volumes:
+      - name: kafka-ca
+        secret:
+          secretName: kafka-ca-cert
+-----------------------------------------------------
+--- ./K8s/micro-services/producer-ingress.yaml ---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: producer-ingress
+  namespace: kafka
+  annotations:
+    konghq.com/plugins: key-auth  # <--- CAMBIATO: da jwt-auth a key-auth
+spec:
+  ingressClassName: kong  
+  rules:
+  - host: producer.192.168.58.2.nip.io  # NOTA: Assicurati che l'IP sia quello del tuo minikube ip
+    http:
+      paths:
+        - path: /event
+          pathType: Prefix
+          backend:
+            service:
+              name: producer-service
+              port:
+                number: 5000
+--------------------------------------------------
+--- ./K8s/micro-services/metrics-ingress.yaml ---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: metrics-ingress
+  namespace: metrics
+  annotations:
+    konghq.com/plugins: key-auth  # <--- CAMBIATO: da jwt-auth a key-auth
+spec:
+  ingressClassName: kong
+  rules:
+    - host: metrics.192.168.58.2.nip.io # NOTA: Verifica IP
+      http:
+        paths:
+          - path: /metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: metrics-service
+                port:
+                  number: 5001
+-------------------------------------------------
+--- ./K8s/micro-services/metrics-deployment.yaml ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -421,12 +540,38 @@ spec:
         image: metrics-service:latest
         imagePullPolicy: IfNotPresent
         env:
-        - name: MONGO_URI
+        # MongoDB Config da ConfigMap
+        - name: MONGO_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_HOST
+        - name: MONGO_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_PORT
+        - name: MONGO_DATABASE
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_DATABASE
+        - name: MONGO_AUTH_SOURCE
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_AUTH_SOURCE
+        # MongoDB Credentials da Secret
+        - name: MONGO_USER
           valueFrom:
             secretKeyRef:
               name: mongo-creds
-              key: MONGO_URI
-          #value: "mongodb://appuser:appuserpass@mongo-mongodb.kafka.svc.cluster.local:27017/student_events?authSource=student_events"
+              key: MONGO_USER
+        - name: MONGO_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongo-creds
+              key: MONGO_PASSWORD
         ports:
         - containerPort: 5001
         resources:
@@ -436,7 +581,6 @@ spec:
           limits:
             cpu: "500m"
             memory: "256Mi"
-
 ---
 apiVersion: v1
 kind: Service
@@ -451,9 +595,8 @@ spec:
       port: 5001
       targetPort: 5001
   type: ClusterIP
-
--------------------------------
---- producer-deployment.yaml ---
+----------------------------------------------------
+--- ./K8s/micro-services/producer-deployment.yaml ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -477,12 +620,12 @@ spec:
         - name: KAFKA_BOOTSTRAP
           value: "uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093"
         - name: SASL_USERNAME
-          value: "producer-user"   # <── Username fisso
+          value: "producer-user"
         - name: SASL_PASSWORD
           valueFrom:
             secretKeyRef:
               name: producer-user
-              key: password         # <── solo password dal Secret
+              key: password
         - name: KAFKA_CA
           value: "/etc/ssl/certs/kafka/ca.crt"
         ports:
@@ -516,39 +659,11 @@ spec:
     port: 5000
     targetPort: 5000
   type: ClusterIP
-
---------------------------------
---- kafka-topic.yaml ---
-apiVersion: kafka.strimzi.io/v1beta2
-kind: KafkaTopic
-metadata:
-  name: sensor-stream
-  namespace: kafka
-  labels:
-    strimzi.io/cluster: uni-it-cluster
-spec:
-  partitions: 3
-  replicas: 1
-  config:
-    retention.ms: 604800000   # 7 giorni
-    segment.bytes: 1073741824 # 1GB per segment
-------------------------
---- jwt-consumer.yaml ---
-apiVersion: configuration.konghq.com/v1
-kind: KongConsumer
-metadata:
-  name: exam-client
-  namespace: kafka
-  annotations:
-    kubernetes.io/ingress.class: kong
-username: exam-client
-credentials:
-  - exam-client-jwt
--------------------------
+-----------------------------------------------------
 ===== FINE Cartella K8s =====
 
 ===== Cartella Metrics-service =====
---- metrics_service.py ---
+--- ./Metrics-service/metrics_service.py ---
 from flask import Flask, jsonify
 from pymongo import MongoClient
 from datetime import datetime, timedelta
@@ -556,10 +671,19 @@ import os
 
 app = Flask(__name__)
 
-MONGO_URI = os.environ["MONGO_URI"]
+# Configurazione MongoDB da ConfigMap e Secret
+MONGO_HOST = os.getenv("MONGO_HOST")
+MONGO_PORT = os.getenv("MONGO_PORT")
+MONGO_DATABASE = os.getenv("MONGO_DATABASE")
+MONGO_USER = os.getenv("MONGO_USER")
+MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
+MONGO_AUTH_SOURCE = os.getenv("MONGO_AUTH_SOURCE")
+
+MONGO_URI = f"mongodb://{MONGO_USER}:{MONGO_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DATABASE}?authSource={MONGO_AUTH_SOURCE}"
+
 client = MongoClient(MONGO_URI)
-db = client.iot_network       
-collection = db.sensor_data   
+db = client[MONGO_DATABASE]
+collection = db.sensor_data
 
 # Test di connessione
 try:
@@ -626,8 +750,8 @@ def firmware_stats():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
---------------------------
---- Dockerfile ---
+--------------------------------------------
+--- ./Metrics-service/Dockerfile ---
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -637,15 +761,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 CMD ["python", "metrics_service.py"]
 
-------------------
---- requirements.txt ---
+------------------------------------
+--- ./Metrics-service/requirements.txt ---
 flask
 pymongo
-------------------------
+------------------------------------------
 ===== FINE Cartella Metrics-service =====
 
 ===== Cartella Producer =====
---- Dockerfile ---
+--- ./Producer/Dockerfile ---
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -656,12 +780,12 @@ EXPOSE 5000
 
 CMD ["python", "producer.py"]
 
-------------------
---- requirements.txt ---
+-----------------------------
+--- ./Producer/requirements.txt ---
 kafka-python
 flask
-------------------------
---- producer.py ---
+-----------------------------------
+--- ./Producer/producer.py ---
 from flask import Flask, request, jsonify
 from kafka import KafkaProducer
 import json, os, uuid
@@ -669,13 +793,15 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-# Configurazione Kafka
+# Configurazione da ConfigMap e Secret
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP")
 SASL_USERNAME = os.getenv("SASL_USERNAME")
 SASL_PASSWORD = os.getenv("SASL_PASSWORD")
 KAFKA_CA = os.getenv("KAFKA_CA", "/etc/ssl/certs/kafka/ca.crt")
 
-TOPIC = "sensor-stream"
+# Topic Kafka
+TOPIC_TELEMETRY = "sensor-telemetry"
+TOPIC_ALERTS = "sensor-alerts"
 
 # Kafka Secure Producer
 producer = KafkaProducer(
@@ -696,50 +822,48 @@ event_count = {
     "alert": 0
 }
 
-def produce_event(event_type: str, payload: dict):
-    """Invia evento IoT a Kafka"""
+def produce_event(topic: str, event_type: str, payload: dict):
+    """Invia evento IoT a Kafka sul topic appropriato"""
     event = {
         "event_id": str(uuid.uuid4()),
         "type": event_type,
         "timestamp": datetime.utcnow().isoformat(),
         **payload
     }
-    producer.send(TOPIC, value=event)
+    producer.send(topic, value=event)
     producer.flush()
     
-    # Aggiorna metriche locali se il tipo è noto
     if event_type in event_count:
         event_count[event_type] += 1
         
-    print(f"[PRODUCER-IOT] Evento inviato: {event_type} -> {event}", flush=True)
+    print(f"[PRODUCER] {event_type} -> {topic}: {event}", flush=True)
     return event
 
 
-# 1. Device Boot
+# 1. Device Boot (Telemetry Topic)
 @app.route("/event/boot", methods=["POST"])
 def device_boot():
     data = request.json or {}
-    # Richiede device_id e zone_id (ex course_id)
     required = ["device_id", "zone_id"] 
     if not all(k in data for k in required):
         return jsonify({"error": f"Missing fields: {required}"}), 400
 
-    event = produce_event("boot", {
+    event = produce_event(TOPIC_TELEMETRY, "boot", {
         "device_id": data["device_id"],
-        "zone_id": data["zone_id"]
+        "zone_id": data["zone_id"],
+        "firmware": data.get("firmware", "unknown")
     })
     return jsonify({"status": "boot_recorded", "event": event}), 200
 
-# 2. Telemetry Data
+# 2. Telemetry Data (Telemetry Topic)
 @app.route("/event/telemetry", methods=["POST"])
 def telemetry():
     data = request.json or {}
-    # Richiede temperatura e umidità invece di score
     required = ["device_id", "temperature", "humidity", "zone_id"]
     if not all(k in data for k in required):
         return jsonify({"error": f"Missing fields: {required}"}), 400
 
-    event = produce_event("telemetry", {
+    event = produce_event(TOPIC_TELEMETRY, "telemetry", {
         "device_id": data["device_id"],
         "zone_id": data["zone_id"],
         "temperature": float(data["temperature"]),
@@ -747,7 +871,7 @@ def telemetry():
     })
     return jsonify({"status": "data_received", "event": event}), 200
 
-# 3. Firmware Update
+# 3. Firmware Update (Telemetry Topic)
 @app.route("/event/firmware_update", methods=["POST"])
 def firmware_update():
     data = request.json or {}
@@ -755,13 +879,13 @@ def firmware_update():
     if not all(k in data for k in required):
         return jsonify({"error": f"Missing fields: {required}"}), 400
 
-    event = produce_event("firmware_update", {
+    event = produce_event(TOPIC_TELEMETRY, "firmware_update", {
         "device_id": data["device_id"],
         "update_to": data["version_to"]
     })
     return jsonify({"status": "update_started", "event": event}), 200
 
-# 4. Critical Alert
+# 4. Critical Alert (Alerts Topic)
 @app.route("/event/alert", methods=["POST"])
 def alert():
     data = request.json or {}
@@ -769,7 +893,7 @@ def alert():
     if not all(k in data for k in required):
         return jsonify({"error": f"Missing fields: {required}"}), 400
 
-    event = produce_event("alert", {
+    event = produce_event(TOPIC_ALERTS, "alert", {
         "device_id": data["device_id"],
         "error_code": data["error_code"],
         "severity": data["severity"]
@@ -784,5 +908,5 @@ def metrics():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
--------------------
+------------------------------
 ===== FINE Cartella Producer =====

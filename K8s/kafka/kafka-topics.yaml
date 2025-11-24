@@ -1,0 +1,29 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: sensor-telemetry
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: uni-it-cluster
+spec:
+  partitions: 3
+  replicas: 2
+  config:
+    retention.ms: 604800000   # 7 giorni
+    segment.bytes: 1073741824 # 1GB
+    compression.type: lz4      # Compressione per alto volume
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: sensor-alerts
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: uni-it-cluster
+spec:
+  partitions: 2
+  replicas: 2
+  config:
+    retention.ms: 2592000000  # 30 giorni (più lungo per audit)
+    segment.bytes: 536870912  # 512MB
+    min.insync.replicas: 2    # Maggiore durabilità per dati critici

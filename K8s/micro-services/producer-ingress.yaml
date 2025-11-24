@@ -4,12 +4,11 @@ metadata:
   name: producer-ingress
   namespace: kafka
   annotations:
-    konghq.com/plugins: jwt-auth  #ABILITA AUTENTICAZIONE CON JWT
-    #konghq.com/strip-path: "true"
+    konghq.com/plugins: key-auth  # <--- CAMBIATO: da jwt-auth a key-auth
 spec:
   ingressClassName: kong  
   rules:
-  - host: producer.192.168.58.2.nip.io
+  - host: producer.192.168.58.2.nip.io  # NOTA: Assicurati che l'IP sia quello del tuo minikube ip
     http:
       paths:
         - path: /event

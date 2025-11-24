@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metrics-service
+  namespace: metrics
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metrics-service
+  template:
+    metadata:
+      labels:
+        app: metrics-service
+    spec:
+      containers:
+      - name: metrics-service
+        image: metrics-service:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        # MongoDB Config da ConfigMap
+        - name: MONGO_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_HOST
+        - name: MONGO_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_PORT
+        - name: MONGO_DATABASE
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_DATABASE
+        - name: MONGO_AUTH_SOURCE
+          valueFrom:
+            configMapKeyRef:
+              name: mongodb-config
+              key: MONGO_AUTH_SOURCE
+        # MongoDB Credentials da Secret
+        - name: MONGO_USER
+          valueFrom:
+            secretKeyRef:
+              name: mongo-creds
+              key: MONGO_USER
+        - name: MONGO_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongo-creds
+              key: MONGO_PASSWORD
+        ports:
+        - containerPort: 5001
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: metrics-service
+  namespace: metrics
+spec:
+  selector:
+    app: metrics-service
+  ports:
+    - protocol: TCP
+      port: 5001
+      targetPort: 5001
+  type: ClusterIP

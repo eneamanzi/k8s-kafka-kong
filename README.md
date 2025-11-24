@@ -1,16 +1,24 @@
 # Progetto Kubernetes per il corso CCT
 
-Questo repository contiene il progetto per il corso di Cloud Computing Technologies (CCT). L'obiettivo è implementare un'architettura a microservizi su Kubernetes per il monitoraggio di una rete di sensori IoT. Il sistema gestisce flussi di telemetria ad alta frequenza tramite Kafka, storicizza i dati su MongoDB ed espone metriche aggregate tramite Kong.
+L'obiettivo è implementare un'architettura a microservizi su Kubernetes per il monitoraggio di una rete di sensori IoT. Il sistema gestisce flussi di telemetria ad alta frequenza tramite **Kafka** (su topic differenziati per priorità), storicizza i dati su **MongoDB** (utilizzando collezioni Time Series ottimizzate) ed espone metriche aggregate tramite **Kong**. L'autenticazione dei dispositivi è gestita tramite **API Key**.
 
 L'architettura include:
 
-* **Kong**: API Gateway per l'esposizione sicura (JWT) degli endpoint dei sensori.
+  * **Kong**: API Gateway per l'esposizione sicura (API Key) degli endpoint dei sensori.
   * **Producer**: Microservizio di ingestione che riceve dati dai dispositivi (Boot, Telemetria, Allarmi) e li pubblica su Kafka.
   * **Kafka (Strimzi)**: Message broker per il buffering e disaccoppiamento del flusso dati (`sensor-stream`).
   * **Consumer**: Worker che processa gli eventi raw e li salva strutturati su MongoDB.
   * **MongoDB**: Database NoSQL per la persistenza (`iot_network`).
   * **Metrics-service**: Servizio di analytics che calcola medie (es. temperatura per zona) e statistiche operative.
 
+**Scelte Architetturali Chiave**
+Questo progetto implementa best practice specifiche per sistemi IoT:
+   - **API Key**: Appropriato per dispositivi con capacità computazionali limitate
+   - **Topic Kafka separati per priorità**: Telemetria ad alto volume vs allarmi critici
+   - **MongoDB Time Series**: Ottimizzazione nativa per dati temporali
+   - **ConfigMap/Secret separation**: Sicurezza e portabilità
+   - **Compressione LZ4**: Riduzione del 40-60% del traffico di rete
+  
 ## Indice
 - [Progetto Kubernetes per il corso CCT](#progetto-kubernetes-per-il-corso-cct)
   - [Indice](#indice)
@@ -23,18 +31,18 @@ L'architettura include:
     - [1. Creazione Namespace](#1-creazione-namespace)
     - [2. Strimzi Kafka Operator](#2-strimzi-kafka-operator)
     - [3. MongoDB](#3-mongodb)
-      - [3.1. Configurazione Utente Applicativo](#31-configurazione-utente-applicativo)
+      - [3.1. Configurazione Utente Applicativo e Time Series Collection](#31-configurazione-utente-applicativo-e-time-series-collection)
+      - [3.2. Configurazione ConfigMap e Secret (per Producer Consumer e Metrics-service)](#32-configurazione-configmap-e-secret-per-producer-consumer-e-metrics-service)
     - [4. Kong API Gateway](#4-kong-api-gateway)
     - [5. Microservizi (Producer, Consumer, Metrics)](#5-microservizi-producer-consumer-metrics)
       - [5.1. Aggiornamento Microservizi](#51-aggiornamento-microservizi)
-    - [6. Creazione Secret per Producer Consumer e Metrics-service](#6-creazione-secret-per-producer-consumer-e-metrics-service)
-    - [7. Autenticazione JWT](#7-autenticazione-jwt)
-      - [7.1. Configurazione JWT: Kong Consumer \& Credentials](#71-configurazione-jwt-kong-consumer--credentials)
-      - [7.2. Attivazione Plugin di Sicurezza](#72-attivazione-plugin-di-sicurezza)
-      - [7.3. Generazione Token di Accesso (Client-Side)](#73-generazione-token-di-accesso-client-side)
+    - [7. Autenticazione: API Key](#7-autenticazione-api-key)
+      - [7.1 Configurazione Key-Auth](#71-configurazione-key-auth)
+      - [7.2 Generazione API Key](#72-generazione-api-key)
+      - [7.3 Setup Client-Side](#73-setup-client-side)
     - [8. Deploy Restante dei Microservizi](#8-deploy-restante-dei-microservizi)
   - [Comandi di Test: verifica del funzionamento + utility](#comandi-di-test-verifica-del-funzionamento--utility)
-    - [1. Setup Variabili Ambiente (IP, PORT, TOKEN)](#1-setup-variabili-ambiente-ip-port-token)
+    - [1. Setup Variabili Ambiente (IP, PORT, KEY)](#1-setup-variabili-ambiente-ip-port-key)
     - [2. Verifica Autenticazione (Security Check)](#2-verifica-autenticazione-security-check)
     - [3. Inviare Eventi al Producer](#3-inviare-eventi-al-producer)
       - [3.1 Device Boot (Avvio Dispositivi)](#31-device-boot-avvio-dispositivi)
@@ -52,7 +60,6 @@ L'architettura include:
     - [3. **Scalabilità \& Load Balancing (senza HPA)**](#3-scalabilità--load-balancing-senza-hpa)
     - [4. **Horizontal Pod Autoscaler (HPA)**](#4-horizontal-pod-autoscaler-hpa)
     - [5. **Kong Rate Limiting Policy (Optional)**](#5-kong-rate-limiting-policy-optional)
-    - [6. Verification \& Success Criteria (Final Checklist)](#6-verification--success-criteria-final-checklist)
 
 
 ## Prerequisiti
@@ -72,17 +79,20 @@ L'architettura include:
 Il sistema implementa un pattern **Event-Driven** con API Gateway per l'autenticazione.
 
 ### Flusso di Ingestione (Scrittura)
-1.  **Client HTTP** (Sensore IoT): Invia una richiesta `POST /event/telemetry` (o Boot/Alert) all'API Gateway (Kong).
-2.  **Kong Gateway**: Intercetta la richiesta e verifica il token JWT nell'header `Authorization`.
-    * **Token Valido**: La richiesta viene inoltrata al servizio **Producer**.
-    * **Token Invalido/Assente**: Kong restituisce immediatamente `401 Unauthorized`.
-3.  **Producer**: Riceve il payload JSON, aggiunge metadati (UUID, timestamp) e pubblica il messaggio sul topic `sensor-stream` di Kafka.
-4.  **Kafka**: Persiste il messaggio in modo distribuito e replicato.
-5.  **Consumer**: Legge il messaggio dal topic e salva il documento neDB `iot_network` di **MongoDB**.
+1.  **Client HTTP** (Sensore IoT): Invia una richiesta `POST /event/...` all'API Gateway (Kong) includendo l'header `apikey`.
+2.  **Kong Gateway**: Verifica l'API Key.
+    * **Key Valida**: La richiesta passa al Producer.
+    * **Key Invalida**: Restituisce `401 Unauthorized`.
+3.  **Producer**: Riceve il payload, aggiunge metadati e instrada il messaggio sul topic Kafka corretto:
+    * `sensor-telemetry`: per dati ad alta frequenza (Boot, Telemetria, Firmware).
+    * `sensor-alerts`: per errori critici (Allarmi).
+4.  **Kafka**: Persiste i messaggi (il topic di telemetria usa compressione LZ4).
+5.  **Consumer**: Legge da entrambi i topic, converte i timestamp e salva nella collezione Time Series di **MongoDB**.
+
 
 ### Flusso di Analisi (Lettura)
 1.  **Client HTTP**: Invia una richiesta `GET /metrics/temperature/average-by-zone` a Kong.
-2.  **Kong Gateway**: Esegue la validazione JWT.
+2.  **Kong Gateway**: Esegue la validazione dell'API Key.
 3.  **Metrics-service**: Riceve la richiesta, esegue query di aggregazione su MongoDB e restituisce le statistiche.
 
 ---
@@ -139,9 +149,9 @@ kubectl create namespace kafka
 
 2. **Deploy del Cluster Kafka** Per prima cosa, applichiamo i manifest che definiscono il Cluster, gli Utenti e i Topic di Kafka. Questo avvierà l'operator Strimzi, che creerà il cluster e genererà il secret `uni-it-cluster-cluster-ca-cert` contenente i certificati CA.
     ```bash
-    kubectl apply -f ./K8s/kafka-cluster.yaml
-    kubectl apply -f ./K8s/kafka-users.yaml
-    kubectl apply -f ./K8s/kafka-topic.yaml
+    kubectl apply -f ./K8s/kafka/kafka-cluster.yaml
+    kubectl apply -f ./K8s/kafka/kafka-users.yaml
+    kubectl apply -f ./K8s/kafka/kafka-topics.yaml
     ```
 
     > **Attendi che il cluster sia pronto:** affinché l'operator crei il cluster potrebbe volerci qualche minuto
@@ -174,9 +184,14 @@ helm install mongo-mongodb bitnami/mongodb --namespace kafka --version 18.1.1
 ```
 >*Se l'installazione fallisce per errori di connessione, riprovare*
 
+Attendiamo il compeltamento (Premi CTRL+C quando vedi Running)
+```bash
+kubectl get pods -n kafka -l app.kubernetes.io/name=mongodb -w
+```
+
 </div>
 
-#### 3.1\. Configurazione Utente Applicativo
+#### 3.1\. Configurazione Utente Applicativo e Time Series Collection
 
 1.  **Recupera la password di root:**
 
@@ -206,7 +221,20 @@ helm install mongo-mongodb bitnami/mongodb --namespace kafka --version 18.1.1
           roles: [ { role: "readWrite", db: "iot_network" } ]
         });
         ```
-4.  **Controllare creazione:**
+
+4. **Crea la Time Series Collection per telemetria**
+    ```mongo
+    db.createCollection("sensor_data", {
+      timeseries: {
+        timeField: "timestamp",
+        metaField: "device_id",
+        granularity: "seconds"
+      },
+      expireAfterSeconds: 2592000  // 30 giorni auto-cleanup
+    });
+    ```
+
+5.  **Controllare creazione:**
 
     ```mongo
     use iot_network;
@@ -215,8 +243,37 @@ helm install mongo-mongodb bitnami/mongodb --namespace kafka --version 18.1.1
     ```mongo
     db.getUsers()
     ```
+    ```mongo
+    //Verifica la creazione
+    db.getCollectionInfos();
+    ```
 
-Le applicazioni useranno questa stringa di connessione: `mongodb://db_user:segreta@mongo-mongodb.kafka.svc.cluster.local:27017/iot_network?authSource=iot_network`
+    Le applicazioni useranno questa stringa di connessione: `mongodb://db_user:segreta@mongo-mongodb.kafka.svc.cluster.local:27017/iot_network?authSource=iot_network`
+
+#### 3.2\. Configurazione ConfigMap e Secret (per Producer Consumer e Metrics-service)
+
+<div style="margin-left: 40px;">
+
+Separiamo la configurazione (ConfigMap) dalle credenziali (Secret).
+
+Utilizziamo Secret kubernetes invece delle password per permettere a Producer, Consumer e Metrics-service di connettersi a MongoDB.
+
+```bash
+# Applica le ConfigMap (Host, Port, DB Name)
+kubectl apply -f ./K8s/mongodb-config.yaml
+
+# Secret per namespace kafka (Producer e Consumer)
+kubectl create secret generic mongo-creds -n kafka \
+  --from-literal=MONGO_USER="db_user" \
+  --from-literal=MONGO_PASSWORD="segreta"
+
+# Secret per namespace metrics
+kubectl create secret generic mongo-creds -n metrics \
+  --from-literal=MONGO_USER="db_user" \
+  --from-literal=MONGO_PASSWORD="segreta"
+```
+</div>
+
 
 ### 4\. Kong API Gateway
 
@@ -304,144 +361,159 @@ kubectl rollout restart deployment -n metrics
 ```
 </div>
 
-### 6\. Creazione Secret per Producer Consumer e Metrics-service
-
+### 7\. Autenticazione: API Key
 <div style="margin-left: 40px;">
 
-Utilizziamo Secret kubernetes invece delle password per permettere a Producer, Consumer e Metrics-service di connettersi a MongoDB.
-Il `MONGO_URI ` è stato ottenuto alla fine del configurazione di MongoDB ([3.1 Configurazione Utente Applicativo](#31-configurazione-utente-applicativo)).
-
-
-```bash
-MONGO_URI=mongodb://db_user:segreta@mongo-mongodb.kafka.svc.cluster.local:27017/iot_network?authSource=iot_network
-
-kubectl create secret generic mongo-creds -n kafka --from-literal=MONGO_URI="$MONGO_URI" 
-
-kubectl create secret generic mongo-creds -n metrics --from-literal=MONGO_URI="$MONGO_URI"
-```
-</div>
-
-
-### 7\. Autenticazione JWT
-<div style="margin-left: 40px;">
-
-L'obiettivo è proteggere gli endpoint esposti (`producer` e `metrics`) bloccando qualsiasi richiesta non autenticata (`401 Unauthorized`) e permettendo l'accesso (`200 OK`) solo se presente un token valido firmato con algoritmo HS256.
+L'obiettivo è proteggere gli endpoint esposti (`producer` e `metrics`) bloccando qualsiasi richiesta non autenticata (`401 Unauthorized`) e permettendo l'accesso (`200 OK`) solo se presente un'API Key valida nell'header `apikey`.
 
 **Componenti utilizzati:**
+  * 2x `KongPlugin` (uno per namespace: `kafka` e `metrics`) - tipo `key-auth`
+  * 1x `KongConsumer` (identità logica "iot-devices")
+  * 2x `Secret` Kubernetes (API Key per namespace `kafka` e `metrics`)
 
-  * 2x `KongPlugin` (uno per namespace: `kafka` e `metrics`)
-  * 1x `KongConsumer` (identità logica del client)
-  * 1x `Secret` Kubernetes (credenziali JWT dichiarative, senza uso di Admin API)
-</div>
+> **Nota di Produzione:** In questo progetto usiamo una **singola API Key condivisa** (`iot-sensor-key-2024-secure`) per semplicità didattica. In produzione, ogni dispositivo IoT dovrebbe avere la propria chiave univoca, generabile con `openssl rand -hex 32`.
 
-#### 7.1\. Configurazione JWT: Kong Consumer & Credentials
+#### 7.1 Configurazione Key-Auth
 <div style="margin-left: 40px;">
 
-Prima di esporre i servizi, configuriamo l'autenticazione. Creiamo l'identità del "consumatore" (è SOLO un oggetto per Kong, NON un utente reale. Serve per collegare una credential JWT ad un “nome”) e le credenziali JWT necessarie per validare i token.
-
-> **Nota:** Questo passaggio crea un `KongConsumer` e un `Secret` Kubernetes contenente la chiave condivisa (HS256) per la firma dei token.
+Abilitiamo il plugin `key-auth` su Kong e creiamo l'identità del consumatore "iot-devices".
 
 ```bash
-kubectl apply -f ./K8s/jwt-credential.yaml
+# Attiva il plugin per i namespace
+kubectl apply -f ./K8s/auth-apikey/apikey-plugin-kafka.yaml
+kubectl apply -f ./K8s/auth-apikey/apikey-plugin-metrics.yaml
 
-kubectl apply -f ./K8s/jwt-consumer.yaml
+# Crea il consumatore logico
+kubectl apply -f ./K8s/auth-apikey/apikey-consumer.yaml
 ```
+> Kong applica la sicurezza tramite plugin associati ai namespace o agli Ingress. Poiché abbiamo Ingress in namespace diversi, attiviamo il plugin `apikey` specificamente per ciascuno di essi.
 </div>
 
-#### 7.2\. Attivazione Plugin di Sicurezza
+
+#### 7.2 Generazione API Key
 <div style="margin-left: 40px;">
 
-Kong applica la sicurezza tramite plugin associati ai namespace o agli Ingress. Poiché abbiamo Ingress in namespace diversi, attiviamo il plugin `jwt` specificamente per ciascuno di essi.
+Creiamo la chiave segreta e la associamo al consumatore.
 
 ```bash
-kubectl apply -f ./K8s/jwt-plugin-kafka.yaml
+# Crea il secret con la chiave
+kubectl apply -f ./K8s/auth-apikey/apikey-credential.yaml
 
-kubectl apply -f ./K8s/jwt-plugin-metrics.yaml
+# Associa la credenziale al consumatore Kong
+kubectl patch kongconsumer iot-devices -n kafka \
+  --type=json \
+  -p='[{"op": "add", "path": "/credentials", "value": ["iot-devices-apikey"]}]'
 ```
+Poiché Kong condivide i consumer tra namespace ma non le credential, dobbiamo creare una seconda API Key secret per il namespace `metrics`:
+```bash
+kubectl apply -f ./K8s/auth-apikey/apikey-credential-metrics.yaml
+```
+
+Verifica:
+```bash
+kubectl get secret -A | grep iot-devices-apikey
+```
+
+Dovresti vedere **2 secret** (uno per kafka, uno per metrics).
 </div>
 
-#### 7.3\. Generazione Token di Accesso (Client-Side)
+#### 7.3 Setup Client-Side
 <div style="margin-left: 40px;">
 
-Qualsiasi richiesta effettuata senza un token valido riceverà un errore `401 Unauthorized`: per interagire con le API, è necessario generare un token JWT firmato con la stessa chiave segreta caricata al punto [7.1. Configurazione JWT: Kong Consumer & Credentials](#71-configurazione-jwt-kong-consumer--credentials)
-
-**Genera il token:** Utilizza lo script Python incluso nella root del progetto (richiede la libreria `pyjwt`) per generare un token e salvarlo in una variabile d'ambiente:
+Esporta la chiave per usarla nei test:
 
 ```bash
-export TOKEN=$(python3 gen_jwt.py)
-echo "Token generato: $TOKEN"
+export API_KEY="iot-sensor-key-2024-secure"
+echo "API Key: $API_KEY"
 ```
-> **Nota di Sicurezza:** Lo script `gen-jwt.py` contiene il segreto condiviso hardcodato per semplicità dimostrativa. In un ambiente di produzione, questa chiave dovrebbe essere iniettata tramite variabili d'ambiente sicure o sistemi di gestione dei segreti (es. Vault).
 </div>
 
 ### 8\. Deploy Restante dei Microservizi
 <div style="margin-left: 40px;">
 
 Ora che l'infrastruttura di base e la sicurezza sono configurate, possiamo deployare i restanti manifest (Deployment, Service, Ingress).
-Gli Ingress (`producer-ingress` e `metrics-ingress`) sono già configurati con l'annotazione `konghq.com/plugins: jwt-auth`, quindi saranno protetti immediatamente al momento della creazione.
+Gli Ingress (`producer-ingress` e `metrics-ingress`) sono già configurati con l'annotazione `konghq.com/plugins: key-auth`, quindi saranno protetti immediatamente al momento della creazione.
 
 ```bash
-kubectl apply -f ./K8s
+kubectl apply -f ./K8s/micro-services/
 ```
 
-*(Questo comando applicherà tutti i file YAML nella cartella K8s, aggiornando quelli già esistenti e creando quelli nuovi).*
+Oppure singolarmente
+```bash
+# Consumer (Backend worker, nessun Ingress)
+kubectl apply -f ./K8s/micro-services/consumer-deployment.yaml
 
->**Attenzione:** I file Ingress in K8s/ sono configurati per l'IP 192.168.49.2. Se minikube ip restituisce un valore diverso, modifica `producer-ingress` e `metrics-ingress` con il tuo IP corretto.
+# Metrics Service (Backend + Ingress)
+kubectl apply -f ./K8s/micro-services/metrics-deployment.yaml
+kubectl apply -f ./K8s/micro-services/metrics-ingress.yaml
+
+# Producer (Backend + Ingress)
+kubectl apply -f ./K8s/micro-services/producer-deployment.yaml
+kubectl apply -f ./K8s/micro-services/producer-ingress.yaml
+```
+
+>**Attenzione:** I file Ingress in K8s/micro-services/ sono configurati per l'IP **192.168.58.2**. Se `minikube ip` restituisce un valore diverso, aggiorna `producer-ingress.yaml` e `metrics-ingress.yaml` con il tuo IP:
+>```yaml
+># In producer-ingress.yaml e metrics-ingress.yaml, modifica:
+>host: producer.TUO_IP.nip.io   # Esempio: producer.192.168.49.2.nip.io
+>host: metrics.TUO_IP.nip.io    # Esempio: metrics.192.168.49.2.nip.io
+>```
+
 </div>
 
 ## Comandi di Test: verifica del funzionamento + utility
 Utilizzeremo  il servizio `nip.io` per risolvere i sottodomini (`producer` e `metrics`) direttamente all'IP del cluster Minikube, permettendoci di testare gli Ingress basati su host. \
 Utilizziamo `curl` per simulare il comportamento dei sensori e verificare il funzionamento della pipeline.
 
-### 1\. Setup Variabili Ambiente (IP, PORT, TOKEN)
+### 1\. Setup Variabili Ambiente (IP, PORT, KEY)
 Prima di iniziare, esportiamo le variabili necessarie per non dover modificare manualmente ogni comando `curl`.
 
 ```bash
 export IP=$(minikube ip)
 export PORT=$(minikube service kong-kong-proxy -n kong --url | head -n 1 | awk -F: '{print $3}')
 
-export TOKEN=$(python3 gen_jwt.py)
+export API_KEY="iot-sensor-key-2024-secure"
 
 echo "Target (IP:PORT): $IP:$PORT"
-echo "Token:  $TOKEN"
+echo "API Key: $API_KEY"
 ```
 
 ### 2\. Verifica Autenticazione (Security Check)
 
 Verifichiamo che il Gateway blocchi correttamente le richieste non autorizzate e accetti quelle valide.
 
-**Scenario A: Accesso Negato (Senza Token)**
+**Scenario A: Accesso Negato (Senza API Key)**
 
 1. **Proviamo a contattare  `producer` senza credenziali.**
     ```bash
-    curl -i -X POST http://producer.$IP.nip.io:$PORT/event/login \
+    curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
       -H "Content-Type: application/json" \
-      -d '{"user_id":"unauthorized-user"}'
+      -d '{"device_id": "hacker-device", "zone_id": "unknown"}'
     ```
     > **Risultato Atteso:** `HTTP/1.1 401 Unauthorized`
 
 2. **Proviamo a contattare `metrics` senza credenziali.**
     ```bash
-    curl -i http://metrics.$IP.nip.io:$PORT/metrics
+    curl -i http://metrics.$IP.nip.io:$PORT/metrics/boots
     ```
     > **Risultato Atteso:** `401 Unauthorized`
 
-**Scenario B: Accesso Consentito (Con Token)**
-Riprova le stesse richiesta aggiungendo l'header `Authorization` con il relativo TOKEN.
+**Scenario B: Accesso Consentito (Con API Key)**
+Riprova le stesse richiesta aggiungendo l'header `apikey` con la relativa API key
 
 1. **Proviamo a contattare  `producer`**
     ```bash
-    curl -i -X POST http://producer.$IP.nip.io:$PORT/event/login \
-      -H "Authorization: Bearer $TOKEN" \
+    curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
+      -H "apikey: $API_KEY" \
       -H "Content-Type: application/json" \
-      -d '{"user_id":"auth-user"}'
+      -d '{"device_id": "test-sensor", "zone_id": "lab", "firmware": "v1.0"}'
     ```
     > **Risultato Atteso:** `HTTP/1.1 200 OK`
 
 2. **Proviamo a contattare `metrics`**
     ```bash
-    curl -i http://metrics.$IP.nip.io:$PORT/metrics/logins \
-      -H "Authorization: Bearer $TOKEN"
+    curl -i  http://metrics.$IP.nip.io:$PORT/metrics/boots \
+      -H "apikey: $API_KEY"
     ```
     > **Risultato Atteso:** `HTTP/1.1 200 OK`
    
@@ -451,7 +523,7 @@ Ora che abbiamo verificato l'accesso, popoliamo il sistema con diversi tipi di e
 
 Queste richieste `curl` colpiscono l'host `producer.$IP.nip.io`, che Kong instrada al servizio `producer`.
 
-**Stampare i log** per vedere se il consumer riceve effettivamente i dati mandati
+**Monitoraggio Logs**: In un altro terminale, osserva il consumer che processa i dati:
   ```bash
   kubectl logs -l app=consumer -n kafka -f
   ```
@@ -461,43 +533,31 @@ Segnala che un sensore si è acceso ed è online.
 ```bash
 # Sensore 1 (Magazzino A)
 curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "apikey: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"device_id": "sensor-01", "zone_id": "warehouse-A", "firmware": "v2.1"}'
+  -d '{"device_id": "sensor-01", "zone_id": "warehouse-A", "firmware": "v1.0"}'
 
 # Sensore 2 (Magazzino A)
 curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "apikey: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"device_id": "sensor-02", "zone_id": "warehouse-A", "firmware": "v2.1"}'
-
-# Sensore 3 (Ufficio B)
-curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"device_id": "sensor-03", "zone_id": "office-B", "firmware": "v1.0"}'
+  -d '{"device_id": "sensor-02", "zone_id": "warehouse-A", "firmware": "v1.0"}'
 ```
 
 #### 3.2 Telemetry Data (Invio Dati Ambientali)
 Invio periodico di temperatura e umidità.
 ```bash
-# Dati normali
+# Dati normali (Sensore 1)
 curl -i -X POST http://producer.$IP.nip.io:$PORT/event/telemetry \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "apikey: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"device_id": "sensor-01", "zone_id": "warehouse-A", "temperature": 24.5, "humidity": 45}'
 
-# Picco di calore (Magazzino A)
+# Picco di calore (Sensore 2)
 curl -i -X POST http://producer.$IP.nip.io:$PORT/event/telemetry \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "apikey: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"device_id": "sensor-02", "zone_id": "warehouse-A", "temperature": 32.0, "humidity": 30}'
-
-# Ambiente fresco (Ufficio B)
-curl -i -X POST http://producer.$IP.nip.io:$PORT/event/telemetry \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"device_id": "sensor-03", "zone_id": "office-B", "temperature": 21.5, "humidity": 55}'
 ```
 
 #### 3.3 Critical Alerts (Gestione Errori)
@@ -505,17 +565,17 @@ Simulazione di un guasto hardware.
 
 ```bash
 curl -i -X POST http://producer.$IP.nip.io:$PORT/event/alert \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "apikey: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"device_id": "sensor-02", "error_code": "OVERHEAT_WARNING", "severity": "high"}'
+  -d '{"device_id": "sensor-02", "error_code": "CRITICAL_OVERHEAT", "severity": "high"}'
 ```
 
 #### 3.4 Firmware Updates (Manutenzione)
 ```bash
 curl -i -X POST http://producer.$IP.nip.io:$PORT/event/firmware_update \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "apikey: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"device_id": "sensor-03", "version_to": "v2.0"}'
+  -d '{"device_id": "sensor-01", "version_to": "v2.0"}'
 ```
 
 ### 4\. Leggere le Metriche (Metrics-service)
@@ -524,21 +584,21 @@ Interroghiamo il sistema per vedere i dati aggregati.
 Queste richieste `curl` colpiscono l'host `metrics.$IP.nip.io`, che Kong instrada al servizio `metrics-service`.
 
 ```bash
-# Totale dispositivi avviati
-curl -s -H "Authorization: Bearer $TOKEN" http://metrics.$IP.nip.io:$PORT/metrics/boots | json_pp
+# 1. Totale dispositivi avviati
+curl -s -H "apikey: $API_KEY" http://metrics.$IP.nip.io:$PORT/metrics/boots | json_pp
 
-# Media temperature per zona (Analisi)
-curl -s -H "Authorization: Bearer $TOKEN" http://metrics.$IP.nip.io:$PORT/metrics/temperature/average-by-zone | json_pp
+# 2. Media temperature per zona
+curl -s -H "apikey: $API_KEY" http://metrics.$IP.nip.io:$PORT/metrics/temperature/average-by-zone | json_pp
 
-# Conteggio allarmi critici
-curl -s -H "Authorization: Bearer $TOKEN" http://metrics.$IP.nip.io:$PORT/metrics/alerts | json_pp
+# 3. Conteggio allarmi critici
+curl -s -H "apikey: $API_KEY" http://metrics.$IP.nip.io:$PORT/metrics/alerts | json_pp
+
+# 4. Statistiche aggiornamenti Firmware
+curl -s -H "apikey: $API_KEY" http://metrics.$IP.nip.io:$PORT/metrics/firmware | json_pp
+
+# 5. Trend attività ultimi 7 giorni
+curl -s -H "apikey: $API_KEY" http://metrics.$IP.nip.io:$PORT/metrics/activity/last7days | json_pp
 ```
-
-TODO mancano queste due metriche da chiamare
-last7days
-
-firmware
-
 
 ### 5\. Database Clean-up (utility)
   
@@ -575,10 +635,9 @@ Estrazione dinamica di IP e Porta del Gateway (Minikube)
 export IP=$(minikube ip)
 export PORT=$(minikube service kong-kong-proxy -n kong --url | head -n 1 | awk -F: '{print $3}')
 
-export TOKEN=$(python3 gen_jwt.py)
-
+export API_KEY="iot-sensor-key-2024-secure"
 echo "Target (IP:PORT): $IP:$PORT"
-echo "Token:  $TOKEN"
+echo "API Key: $API_KEY"
 ```
 
 ### 1\. **Security & Secrets Management**
@@ -599,27 +658,25 @@ echo "Token:  $TOKEN"
     Tenta una connessione senza credenziali per confermare che venga rifiutata, fallisce restituendo `Unauthorized`.
 
     ```bash
-    curl -X POST http://producer.$IP.nip.io:$PORT/event/boot \
+    curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
       -H "Content-Type: application/json" \
-      -d '{"device_id": "unauthorized-sensor", "zone_id": "test"}'
+      -d '{"device_id": "unauth-sensor", "zone_id": "test"}'
     ```
 
     > **Expectation:** message: `Unauthorized`.
 
-3.  **Verifica Kubernetes Secrets:**
-    Conferma che nessuna password sia in chiaro nei manifest dei Deployment.
-
+3.  **Verifica Kubernetes Secrets/ConfigMap:** Verifica che le credenziali non siano in chiaro e che la configurazione sia separata.
     ```bash
-    kubectl get deploy -n kafka producer -o yaml | grep -n "MONGO_URI\|SASL_PASSWORD\|value:"
+    # Verifica Secret (credenziali cifrate)
+    kubectl get secret -n kafka mongo-creds -o yaml | grep "MONGO_"
+
+    # Verifica ConfigMap (configurazione in chiaro)
+    kubectl get configmap -n kafka mongodb-config -o yaml | grep "MONGO_"
     ```
 
-    > **Expectation:** Nessuna credenziale visibile. I valori vengoo letti attraverso `valueFrom.secretKeyRef`.
-
-    Per ottenere i secret generati:
-    ```bash
-    kubectl get secret -n kafka mongo-creds -o yaml | head -n 20
-    kubectl get secret -n metrics mongo-creds -o yaml | head -n 20
-    ```
+    > Expectation: 
+    > * Nel Secret, i valori `MONGO_USER`e `MONGO_PASSWORD` sono in base64 (non leggibili direttamente).
+    > * Nella ConfigMap, i valori `MONGO_HOST`, `MONGO_PORT`, ecc. sono in chiaro (OK, non sono sensibili)
 
 ### 2\. **Resilience, Fault Tolerance & High Availability**
 
@@ -641,10 +698,10 @@ Questo scenario simula il crash improvviso del Consumer mentre i dati continuano
 
     ```bash
     for i in {1..5}; do
-      curl -s -X POST http://producer.$IP.nip.io:$PORT/event/boot \
-      -H "Authorization: Bearer $TOKEN" \
+      curl -s -X POST http://producer.$IP.nip.io:$PORT/event/telemetry \
+      -H "apikey: $API_KEY" \
       -H "Content-Type: application/json" \
-      -d "{\"device_id\":\"offline-sensor-$i\", \"zone_id\":\"buffer-test\"}" >/dev/null
+      -d "{\"device_id\":\"offline-sensor-$i\", \"zone_id\":\"buffer-test\", \"temperature\": 20.0, \"humidity\": 50.0}" >/dev/null
     done
     ```
 
@@ -656,13 +713,13 @@ Questo scenario simula il crash improvviso del Consumer mentre i dati continuano
     ```
 
 4. **Verifica il processamento dei log**
-    Osserva i log: dovresti vedere i messaggi inviati durante il "downtime" (quelli con ID `offline-msg-*`) venire processati immediatamente al riavvio.
+    Osserva i log: dovresti vedere i messaggi inviati durante il "downtime" (quelli con ID `offline-sensor-*`) venire processati immediatamente al riavvio.
 
     ```bash
     kubectl logs -n kafka -l app=consumer -f --tail=20
     ```
 
-> **Expectation:** Al riavvio, il Consumer processa immediatamente i messaggi `offline-msg-*`. Nessuna perdita di dati.
+> **Expectation:** Al riavvio, il Consumer processa immediatamente i messaggi `offline-sensor-*`. Nessuna perdita di dati.
 
 
 #### 2.2\. High Availability: Self-Healing del Producer
@@ -710,7 +767,7 @@ Questo test verifica la resilienza dell'infrastruttura simulando un crash improv
     while true; do 
       curl -s -o /dev/null -w "%{http_code} " \
       http://producer.$IP.nip.io:$PORT/event/boot \
-      -H "Authorization: Bearer $TOKEN" \
+      -H "apikey: $API_KEY" \
       -H "Content-Type: application/json" \
       -d '{"device_id":"healing-check", "zone_id":"ha-test"}'
       sleep 0.5
@@ -749,9 +806,9 @@ Questo test simula uno scenario di alto carico per verificare due comportamenti 
     ```bash
     for i in {1..50}; do
       curl -s -X POST http://producer.$IP.nip.io:$PORT/event/telemetry \
-      -H "Authorization: Bearer $TOKEN" \
+      -H "apikey: $API_KEY" \
       -H "Content-Type: application/json" \
-      -d "{\"device_id\":\"load-test-$i\", \"zone_id\":\"LB-test\", \"temperature\": 20.0, \"humidity\": 50.0}" >/dev/null
+      -d "{\"device_id\":\"load-test-$i\", \"zone_id\":\"LB-test\", \"temperature\": 22.5, \"humidity\": 48.0}" >/dev/null
     done
     ```
 
@@ -792,7 +849,7 @@ Questo test simula uno scenario di alto carico per verificare due comportamenti 
 
 1.  **Setup Iniziale:** Deploy della configurazione per HPA
     ```bash
-    kubectl apply -f K8s/hpa.yaml
+    kubectl apply -f ./K8s/hpa.yaml
     ```
 
     Comandi per controllare che sia effettivamente deployato e i relativi valori
@@ -806,11 +863,11 @@ Questo test simula uno scenario di alto carico per verificare due comportamenti 
 
     ```bash
     for i in {1..5000}; do
-    curl -s -X POST "http://producer.$IP.nip.io:$PORT/event/telemetry" \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "{\"device_id\":\"stress-sensor-$i\", \"zone_id\":\"HPA-test\", \"temperature\": 50.0, \"humidity\": 10.0}" \
-      > /dev/null
+      curl -s -X POST "http://producer.$IP.nip.io:$PORT/event/telemetry" \
+        -H "apikey: $API_KEY" \
+        -H "Content-Type: application/json" \
+        -d "{\"device_id\":\"stress-sensor-$i\", \"zone_id\":\"HPA-test\", \"temperature\": 50.0, \"humidity\": 10.0}" \
+        > /dev/null
     done
     ```
 
@@ -855,16 +912,16 @@ Definiamo una risorsa `KongPlugin` che impone un limite di **5 richieste al seco
 2. **Attivazione plugin Rate Limiting su Kong (5 req/sec)**
     ```bash
     kubectl patch ingress producer-ingress -n kafka \
-    -p '{"metadata":{"annotations":{"konghq.com/plugins":"jwt-auth, global-rate-limit"}}}'
+    -p '{"metadata":{"annotations":{"konghq.com/plugins":"key-auth, global-rate-limit"}}}'
     ```
 3. **Esegui il Flood Test**
     ```bash
     for i in {1..20}; do
       curl -s -o /dev/null -w "%{http_code}\n" \
-      -X POST http://producer.$IP.nip.io:$PORT/event/boot \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "{\"device_id\":\"flood-$i\", \"zone_id\":\"DoS-test\"}"
+        -X POST http://producer.$IP.nip.io:$PORT/event/telemetry \
+        -H "apikey: $API_KEY" \
+        -H "Content-Type: application/json" \
+        -d "{\"device_id\":\"flood-$i\", \"zone_id\":\"DoS-test\", \"temperature\": 0, \"humidity\": 0}"
     done
     ```
     > **Expectation:** Dopo le prime richieste (codice `200`), si ricevono risposte `429 Too Many Requests`.
@@ -875,21 +932,7 @@ Definiamo una risorsa `KongPlugin` che impone un limite di **5 richieste al seco
     
     # lascio solo il plugin per autenticazione
     kubectl patch ingress producer-ingress -n kafka \
-    -p '{"metadata":{"annotations":{"konghq.com/plugins":"jwt-auth"}}}'
+    -p '{"metadata":{"annotations":{"konghq.com/plugins":"key-auth"}}}'
     ```
 
     > **Expectation:** Si ottengono solo risposte con codice `200` data l'assenza del rate-limiting.
-
-
-
-### 6\. Verification & Success Criteria (Final Checklist)
-
-Questa sezione riassume i criteri di accettazione per considerare il sistema **pronto per la produzione**. 
-
-| Area | Controllo (Action) | Comando di Verifica Rapida | Success Criteria (Output Atteso) |
-| :--- | :--- | :--- | :--- |
-| **Security** | **TLS Encryption** | `kubectl exec -it -n kafka uni-it-cluster-broker-0 -- openssl s_client -connect uni-it-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093 -brief </dev/null` | Protocollo: `TLSv1.3` (o v1.2) <br> Cipher Suite: Elevata (es. `TLS_AES_256...`) |
-| **Security** | **Auth Reject** | `curl -X POST http://producer.$IP.nip.io:$PORT/event/login -H "Content-Type: application/json" -d '{"user_id": "test_unauthorized_user"}'`| Status Code: `401 Unauthorized` |
-| **Availability** | **Pod Status** | `kubectl get pods -A -l "app in (producer, consumer, metrics-service)"` | Tutti i Pod in stato `Running`. |
-| **Reliability** | **No Data Loss** | `kubectl logs -n kafka -l app=consumer --tail=100 \| grep "offline-msg"` | Presenza dei log per i messaggi inviati durante il downtime (es. `offline-msg-*`). |
-| **Scalability** | **HPA Trigger** | `kubectl get hpa -n kafka` | Colonna `REPLICAS` > `MINPODS` durante il carico. <br> Colonna `TARGETS` mostra % > 50%. |
