@@ -65,7 +65,7 @@ cartelle_da_includere = [
 ]
 
 # 2. Nome del file di output
-file_output = "contenuto_prompt.txt"
+file_output = "contenuto_prompt_NEW.txt"
 
 # 3. Salva lo standard output originale (il terminale)
 stdout_originale = sys.stdout
