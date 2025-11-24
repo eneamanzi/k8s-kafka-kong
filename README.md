@@ -36,11 +36,11 @@ Questo progetto implementa best practice specifiche per sistemi IoT:
     - [4. Kong API Gateway](#4-kong-api-gateway)
     - [5. Microservizi (Producer, Consumer, Metrics)](#5-microservizi-producer-consumer-metrics)
       - [5.1. Aggiornamento Microservizi](#51-aggiornamento-microservizi)
-    - [7. Autenticazione: API Key](#7-autenticazione-api-key)
-      - [7.1 Configurazione Key-Auth](#71-configurazione-key-auth)
-      - [7.2 Generazione API Key](#72-generazione-api-key)
-      - [7.3 Setup Client-Side](#73-setup-client-side)
-    - [8. Deploy Restante dei Microservizi](#8-deploy-restante-dei-microservizi)
+    - [6. Autenticazione: API Key](#6-autenticazione-api-key)
+      - [6.1 Configurazione Key-Auth](#61-configurazione-key-auth)
+      - [6.2 Generazione API Key](#62-generazione-api-key)
+      - [6.3 Setup Client-Side](#63-setup-client-side)
+    - [7. Deploy Restante dei Microservizi](#7-deploy-restante-dei-microservizi)
   - [Comandi di Test: verifica del funzionamento + utility](#comandi-di-test-verifica-del-funzionamento--utility)
     - [1. Setup Variabili Ambiente (IP, PORT, KEY)](#1-setup-variabili-ambiente-ip-port-key)
     - [2. Verifica Autenticazione (Security Check)](#2-verifica-autenticazione-security-check)
@@ -362,7 +362,7 @@ kubectl rollout restart deployment -n metrics
 ```
 </div>
 
-### 7\. Autenticazione: API Key
+### 6\. Autenticazione: API Key
 <div style="margin-left: 40px;">
 
 L'obiettivo è proteggere gli endpoint esposti (`producer` e `metrics`) bloccando qualsiasi richiesta non autenticata (`401 Unauthorized`) e permettendo l'accesso (`200 OK`) solo se presente un'API Key valida nell'header `apikey`.
@@ -374,7 +374,7 @@ L'obiettivo è proteggere gli endpoint esposti (`producer` e `metrics`) bloccand
 
 > **Nota di Produzione:** In questo progetto usiamo una **singola API Key condivisa** (`iot-sensor-key-prod-v1`) per semplicità didattica. In produzione, ogni dispositivo IoT dovrebbe avere la propria chiave univoca, generabile con `openssl rand -hex 32`.
 
-#### 7.1 Configurazione Key-Auth
+#### 6.1 Configurazione Key-Auth
 <div style="margin-left: 40px;">
 
 Abilitiamo il plugin `key-auth` su Kong e creiamo l'identità del consumatore "iot-devices".
@@ -391,7 +391,7 @@ kubectl apply -f ./K8s/auth-apikey/apikey-consumer.yaml
 </div>
 
 
-#### 7.2 Generazione API Key
+#### 6.2 Generazione API Key
 <div style="margin-left: 40px;">
 
 Creiamo la chiave segreta e la associamo al consumatore.
@@ -418,7 +418,7 @@ kubectl get secret -A | grep iot-devices-apikey
 Dovresti vedere **2 secret** (uno per kafka, uno per metrics).
 </div>
 
-#### 7.3 Setup Client-Side
+#### 6.3 Setup Client-Side
 <div style="margin-left: 40px;">
 
 Esporta la chiave per usarla nei test:
@@ -429,17 +429,12 @@ echo "API Key: $API_KEY"
 ```
 </div>
 
-### 8\. Deploy Restante dei Microservizi
+### 7\. Deploy Restante dei Microservizi
 <div style="margin-left: 40px;">
 
 Ora che l'infrastruttura di base e la sicurezza sono configurate, possiamo deployare i restanti manifest (Deployment, Service, Ingress).
 Gli Ingress (`producer-ingress` e `metrics-ingress`) sono già configurati con l'annotazione `konghq.com/plugins: key-auth`, quindi saranno protetti immediatamente al momento della creazione.
 
-```bash
-kubectl apply -f ./K8s/micro-services/
-```
-
-Oppure singolarmente
 ```bash
 # Consumer (Backend worker, nessun Ingress)
 kubectl apply -f ./K8s/micro-services/consumer-deployment.yaml
@@ -483,7 +478,7 @@ echo "API Key: $API_KEY"
 
 Verifichiamo che il Gateway blocchi correttamente le richieste non autorizzate e accetti quelle valide.
 
-**Scenario A: Accesso Negato (Senza API Key)**
+**Scenario A: Accesso Negato (Senza API Key o con key errata)**
 
 1. **Proviamo a contattare  `producer` senza credenziali.**
     ```bash
@@ -656,15 +651,20 @@ echo "API Key: $API_KEY"
     > **Expectation:** Output contenente `Protocol version: TLSv1.3` e Cipher Suite robusta (es. `TLS_AES_256_GCM_SHA384`).
 
 2.  **Verifica SASL (Authentication):**
-    Tenta una connessione senza credenziali per confermare che venga rifiutata, fallisce restituendo `Unauthorized`.
+    Tenta una connessione senza credenziali per confermare che venga rifiutata, fallisce restituendo `No API key found in request` o `Unauthorized`.
 
     ```bash
     curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
       -H "Content-Type: application/json" \
       -d '{"device_id": "unauth-sensor", "zone_id": "test"}'
     ```
-
-    > **Expectation:** message: `Unauthorized`.
+    Viene rifiutata anche se si usa una chiave diversa da quelal registrata
+    ```bash
+    curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
+      -H "apikey: bad-key" \
+      -H "Content-Type: application/json" \
+      -d '{"device_id": "test-sensor", "zone_id": "lab", "firmware": "v1.0"}'
+    ```
 
 3.  **Verifica Kubernetes Secrets/ConfigMap:** Verifica che le credenziali non siano in chiaro e che la configurazione sia separata.
     ```bash
@@ -729,23 +729,28 @@ Questo scenario simula il crash improvviso del Consumer mentre i dati continuano
 
 Questo test verifica la resilienza dell'infrastruttura simulando un crash improvviso (o un'eliminazione accidentale) di un Pod. L'obiettivo è dimostrare che Kubernetes rileva la discrepanza tra lo stato desiderato e quello attuale, avviando immediatamente una nuova istanza per ripristinare il servizio.
 
-1. **Verifica stato iniziale**
+1. **Watcher sul producer**
     Prima di causare il guasto, identifichiamo il pod del Producer attivo e notiamo il suo `AGE` (tempo di attività).
 
-    ```bash
-    kubectl get pods -n kafka -l app=producer
-    ```
-
-    > *Nota:* Prendi nota del nome del pod (es. `producer-5d6f8-...`) e del fatto che è attivo da tempo (es. `5d`).
-
-2. **Verifica del Ripristino Automatico**
-    Osserviamo immediatamente lo stato dei pod. Kubernetes dovrebbe terminare il vecchio pod e crearne uno nuovo istantaneamente.
-
-    ```bash
+     ```bash
     kubectl get pods -n kafka -l app=producer -w
     ```
+    > Quando simuliamo il crash Kubernetes dovrebbe terminare il vecchio pod e crearne uno nuovo istantaneamente.
 
-    *(Premi `CTRL+C` per uscire quando vedi il nuovo pod in Running)*
+2. **Verifica Continuità del Servizio**
+    Per dimostrare che il disservizio è minimo o nullo durante il self-healing, lanciare questo loop in un terminale separato **prima** di uccidere il pod (passo successivo).
+    ```bash
+    # Invia una richiesta ogni 0.5s per monitorare la disponibilità
+    while true; do 
+      curl -s -o /dev/null -w "%{http_code} " \
+      http://producer.$IP.nip.io:$PORT/event/boot \
+      -H "apikey: $API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{"device_id":"healing-check", "zone_id":"ha-test"}'
+      sleep 0.5
+    done
+    ```
+    > **Risultato atteso:** Vedrai una sequenza di codici `200`. Potresti vedere un breve momento di pausa o un singolo errore di connessione durante lo switch, ma il servizio tornerà subito a rispondere `200`.
 
 3. **Simulazione del Guasto (Kill Pod)**
     Forziamo la cancellazione del pod attualmente in esecuzione. Questo simula un "crash" fatale dell'applicazione.
@@ -760,21 +765,13 @@ Questo test verifica la resilienza dell'infrastruttura simulando un crash improv
     > 2.  Un **nuovo pod** (con un nome diverso) appare immediatamente in stato `Pending` -\> `ContainerCreating` -\> `Running`.
     > 3.  L'operazione avviene senza intervento umano.
 
-4. **Test Opzionale: Verifica Continuità del Servizio**
-    Per dimostrare che il disservizio è minimo o nullo durante il self-healing, puoi lanciare questo loop in un terminale separato **prima** di uccidere il pod (passo 2).
-
+4. **NO-down-time**
+    Se deployamo più di un producer e ne crasha uno, le richieste vengono instradate all'altro, evitando completamente downtime
     ```bash
-    # Invia una richiesta ogni 0.5s per monitorare la disponibilità
-    while true; do 
-      curl -s -o /dev/null -w "%{http_code} " \
-      http://producer.$IP.nip.io:$PORT/event/boot \
-      -H "apikey: $API_KEY" \
-      -H "Content-Type: application/json" \
-      -d '{"device_id":"healing-check", "zone_id":"ha-test"}'
-      sleep 0.5
-    done
+    kubectl scale deploy/producer -n kafka --replicas=2
     ```
-    > **Risultato atteso:** Vedrai una sequenza di codici `200`. Potresti vedere un breve momento di pausa o un singolo errore di connessione durante lo switch, ma il servizio tornerà subito a rispondere `200`.
+
+    
 
 ### 3\. **Scalabilità & Load Balancing (senza HPA)**
 
@@ -820,7 +817,7 @@ Questo test simula uno scenario di alto carico per verificare due comportamenti 
     kubectl logs -n kafka -l app=producer --tail=50 --prefix=true | grep "load-test"
     ```
 
-    > **Expectation:** Osservando i log, dovresti vedere che le richieste `lb-test-*` sono state gestite alternativamente dai due pod diversi (es. *vv8cg/producer* e *bpn87/producer*), confermando che il carico è stato bilanciato dal Kong Ingress e dal producer-service.
+    > **Expectation:** Osservando i log, dovresti vedere che le richieste `load-test-*` sono state gestite alternativamente dai due pod diversi (es. *vv8cg/producer* e *bpn87/producer*), confermando che il carico è stato bilanciato dal Kong Ingress e dal producer-service.
 
 4. **Validazione2: Consumer & Partizioni**
     Verifica che i messaggi siano stati processati da tutte e tre le repliche del Consumer.
