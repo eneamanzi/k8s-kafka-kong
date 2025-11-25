@@ -37,31 +37,31 @@ def fix_timestamp(event):
     return event
 
 def handle_boot(event):
-    event = fix_timestamp(event) # <--- Aggiungi conversione
+    event = fix_timestamp(event) 
     print(f"[BOOT] Device {event.get('device_id')} attivo in zona {event.get('zone_id')}.", flush=True)
     event["_ingest_ts"] = datetime.utcnow()
     collection.insert_one(event)
 
 def handle_telemetry(event):
-    event = fix_timestamp(event) # <--- Aggiungi conversione
+    event = fix_timestamp(event) 
     print(f"[TELEMETRY] Device {event.get('device_id')} -> Temp: {event.get('temperature')}°C, Hum: {event.get('humidity')}%", flush=True)
     event["_ingest_ts"] = datetime.utcnow()
     collection.insert_one(event)
 
 def handle_firmware_update(event):
-    event = fix_timestamp(event) # <--- Aggiungi conversione
+    event = fix_timestamp(event) 
     print(f"[UPDATE] Device {event.get('device_id')} aggiornamento a {event.get('update_to')}.", flush=True)
     event["_ingest_ts"] = datetime.utcnow()
     collection.insert_one(event)
 
 def handle_alert(event):
-    event = fix_timestamp(event) # <--- Aggiungi conversione
+    event = fix_timestamp(event) 
     print(f"[ALERT] CRITICO: Device {event.get('device_id')} Code: {event.get('error_code')}", flush=True)
     event["_ingest_ts"] = datetime.utcnow()
     collection.insert_one(event)
 
 def handle_unknown(event):
-    event = fix_timestamp(event) # <--- Aggiungi conversione
+    event = fix_timestamp(event) 
     print(f"[IGNOTO] Tipo evento non gestito: {event.get('type')}", flush=True)
     event["_ingest_ts"] = datetime.utcnow()
     collection.insert_one(event)
