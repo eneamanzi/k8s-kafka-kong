@@ -17,7 +17,9 @@ Questo progetto implementa best practice specifiche per sistemi IoT:
    - **Topic Kafka separati per priorità**: Telemetria ad alto volume vs allarmi critici
    - **MongoDB Time Series**: Ottimizzazione nativa per dati temporali
    - **ConfigMap/Secret separation**: Sicurezza e portabilità
-   - **Compressione LZ4**: Riduzione del 40-60% del traffico di rete
+   - **Strategia di Compressione Ibrida**:
+     - **Transport Layer (Kafka)**: Utilizzo di **LZ4** sul topic di telemetria per massimizzare il throughput e ridurre il traffico di rete
+     - **Storage Layer (MongoDB)**: Sfruttamento della compressione nativa **Zstd** delle Time Series Collections per minimizzare l'occupazione su disco dei dati storici.
   
 ## Indice
 - [Progetto Kubernetes per il corso CCT](#progetto-kubernetes-per-il-corso-cct)
@@ -77,6 +79,8 @@ Questo progetto implementa best practice specifiche per sistemi IoT:
 ## Architettura e Funzionamento
 
 Il sistema implementa un pattern **Event-Driven** con API Gateway per l'autenticazione.
+
+![Architettura](iot-kubernetes-architecture.svg)
 
 ### Flusso di Ingestione (Scrittura)
 1.  **Client HTTP** (Sensore IoT): Invia una richiesta `POST /event/...` all'API Gateway (Kong) includendo l'header `apikey`.
@@ -451,8 +455,8 @@ kubectl apply -f ./K8s/micro-services/producer-ingress.yaml
 >**Attenzione:** I file Ingress in K8s/micro-services/ sono configurati per l'IP **192.168.58.2**. Se `minikube ip` restituisce un valore diverso, aggiorna `producer-ingress.yaml` e `metrics-ingress.yaml` con il tuo IP:
 >```yaml
 ># In producer-ingress.yaml e metrics-ingress.yaml, modifica:
->host: producer.TUO_IP.nip.io   # Esempio: producer.192.168.49.2.nip.io
->host: metrics.TUO_IP.nip.io    # Esempio: metrics.192.168.49.2.nip.io
+>host: producer.TUO_IP.nip.io   
+>host: metrics.TUO_IP.nip.io    
 >```
 
 </div>
@@ -650,7 +654,7 @@ echo "API Key: $API_KEY"
 
     > **Expectation:** Output contenente `Protocol version: TLSv1.3` e Cipher Suite robusta (es. `TLS_AES_256_GCM_SHA384`).
 
-2.  **Verifica SASL (Authentication):**
+2.  **Verifica Authentication:**
     Tenta una connessione senza credenziali per confermare che venga rifiutata, fallisce restituendo `No API key found in request` o `Unauthorized`.
 
     ```bash

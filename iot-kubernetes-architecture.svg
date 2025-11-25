@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1400 900" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <!-- Gradients -->
+                <linearGradient id="kongGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#003459"/>
+                    <stop offset="100%" stop-color="#00A8E8"/>
+                </linearGradient>
+                <linearGradient id="kafkaGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#231F20"/>
+                    <stop offset="100%" stop-color="#4A4A4A"/>
+                </linearGradient>
+                <linearGradient id="mongoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#00684A"/>
+                    <stop offset="100%" stop-color="#00ED64"/>
+                </linearGradient>
+                
+                <!-- Arrow markers -->
+                <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                    <polygon points="0 0, 10 3, 0 6" fill="#64748b"/>
+                </marker>
+                <marker id="arrowheadSecure" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                    <polygon points="0 0, 10 3, 0 6" fill="#22c55e"/>
+                </marker>
+            </defs>
+
+            <!-- Title -->
+            <text x="700" y="30" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e293b">
+                IoT Kubernetes - Event-Driven Architecture
+            </text>
+
+            <!-- LAYER 1: IoT Device -->
+            <g id="client-layer">
+                <rect x="50" y="60" width="180" height="110" rx="10" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="2"/>
+                <text x="140" y="90" text-anchor="middle" font-size="16" font-weight="bold" fill="#334155">IoT Device</text>
+                <circle cx="140" cy="125" r="20" fill="#3b82f6" opacity="0.2"/>
+                <circle cx="140" cy="125" r="14" fill="#3b82f6"/>
+                <text x="140" y="133" text-anchor="middle" font-size="20" fill="white">📡</text>
+                <text x="140" y="158" text-anchor="middle" font-size="11" fill="#64748b">HTTP POST</text>
+            </g>
+
+            <!-- Arrow: Client -> Kong -->
+            <path d="M 230 115 L 310 115" stroke="#64748b" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+            <text x="270" y="105" text-anchor="middle" font-size="10" font-weight="600" fill="#64748b">API Key</text>
+
+            <!-- LAYER 2: Kong Gateway -->
+            <g id="kong-layer">
+                <rect x="310" y="40" width="240" height="150" rx="10" fill="url(#kongGrad)" stroke="#003459" stroke-width="3"/>
+                <text x="430" y="70" text-anchor="middle" font-size="18" font-weight="bold" fill="white">Kong API Gateway</text>
+                
+                <g transform="translate(330, 85)">
+                    <rect width="200" height="28" rx="5" fill="rgba(255,255,255,0.15)"/>
+                    <text x="10" y="19" font-size="11" fill="white">🔐 API Key Authentication</text>
+                </g>
+                <g transform="translate(330, 118)">
+                    <rect width="200" height="28" rx="5" fill="rgba(255,255,255,0.15)"/>
+                    <text x="10" y="19" font-size="11" fill="white">⚖️  Load Balancing</text>
+                </g>
+                <g transform="translate(330, 151)">
+                    <rect width="90" height="20" rx="4" fill="rgba(255,255,255,0.2)"/>
+                    <text x="45" y="14" text-anchor="middle" font-size="10" fill="white">Rate Limiting</text>
+                </g>
+            </g>
+
+            <!-- Arrow: Kong -> Producer -->
+            <path d="M 550 115 L 630 115" stroke="#22c55e" stroke-width="4" fill="none" marker-end="url(#arrowheadSecure)"/>
+            <text x="590" y="105" text-anchor="middle" font-size="10" font-weight="bold" fill="#22c55e">✓ Auth OK</text>
+
+            <!-- LAYER 3: Producer -->
+            <g id="producer-layer">
+                <rect x="630" y="60" width="200" height="110" rx="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+                <text x="730" y="90" text-anchor="middle" font-size="16" font-weight="bold" fill="#92400e">Producer Service</text>
+                <text x="730" y="110" text-anchor="middle" font-size="11" fill="#78350f">Flask REST API</text>
+                <g transform="translate(655, 120)">
+                    <rect width="150" height="38" rx="5" fill="rgba(245,158,11,0.1)" stroke="#f59e0b" stroke-width="1"/>
+                    <text x="75" y="14" text-anchor="middle" font-size="10" fill="#92400e">/event/boot</text>
+                    <text x="75" y="28" text-anchor="middle" font-size="10" fill="#92400e">/event/telemetry</text>
+                </g>
+            </g>
+
+            <!-- Arrow: Producer -> Kafka -->
+            <path d="M 730 170 L 730 245" stroke="#22c55e" stroke-width="4" fill="none" marker-end="url(#arrowheadSecure)"/>
+            <text x="770" y="210" font-size="10" font-weight="bold" fill="#22c55e">TLS+SASL</text>
+
+            <!-- LAYER 4: Kafka Cluster -->
+            <g id="kafka-layer">
+                <rect x="580" y="245" width="300" height="175" rx="10" fill="url(#kafkaGrad)" stroke="#231F20" stroke-width="3"/>
+                <text x="730" y="275" text-anchor="middle" font-size="18" font-weight="bold" fill="white">Kafka Cluster (Strimzi)</text>
+
+                <!-- Topic 1 -->
+                <g transform="translate(600, 290)">
+                    <rect width="125" height="52" rx="5" fill="rgba(255,255,255,0.15)" stroke="white" stroke-width="1"/>
+                    <text x="62.5" y="18" text-anchor="middle" font-size="12" font-weight="bold" fill="white">sensor-telemetry</text>
+                    <text x="62.5" y="34" text-anchor="middle" font-size="9" fill="#cbd5e1">3 parts | LZ4</text>
+                    <text x="62.5" y="46" text-anchor="middle" font-size="9" fill="#cbd5e1">Retention: 7d</text>
+                </g>
+
+                <!-- Topic 2 -->
+                <g transform="translate(755, 290)">
+                    <rect width="105" height="52" rx="5" fill="rgba(255,255,255,0.15)" stroke="white" stroke-width="1"/>
+                    <text x="52.5" y="18" text-anchor="middle" font-size="12" font-weight="bold" fill="white">sensor-alerts</text>
+                    <text x="52.5" y="34" text-anchor="middle" font-size="9" fill="#cbd5e1">2 partitions</text>
+                    <text x="52.5" y="46" text-anchor="middle" font-size="9" fill="#cbd5e1">Retention: 30d</text>
+                </g>
+
+                <!-- HA Config -->
+                <g transform="translate(600, 352)">
+                    <rect width="260" height="50" rx="5" fill="rgba(34,197,94,0.2)" stroke="#22c55e" stroke-width="2"/>
+                    <text x="10" y="18" font-size="10" fill="#dcfce7">⚡ 2 Controllers + 2 Brokers</text>
+                    <text x="10" y="34" font-size="10" fill="#dcfce7">🔄 Replicas: 2 | Min ISR: 1</text>
+                </g>
+            </g>
+
+            <!-- Arrow: Kafka -> Consumer -->
+            <path d="M 880 332 L 970 332" stroke="#22c55e" stroke-width="4" fill="none" marker-end="url(#arrowheadSecure)"/>
+            <text x="925" y="322" text-anchor="middle" font-size="10" font-weight="bold" fill="#22c55e">Consumer Group</text>
+
+            <!-- LAYER 5: Consumer -->
+            <g id="consumer-layer">
+                <rect x="970" y="280" width="200" height="105" rx="10" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
+                <text x="1070" y="310" text-anchor="middle" font-size="16" font-weight="bold" fill="#1e3a8a">Consumer Service</text>
+                <text x="1070" y="330" text-anchor="middle" font-size="11" fill="#1e40af">Async Processing</text>
+                <g transform="translate(995, 340)">
+                    <rect width="150" height="35" rx="5" fill="rgba(59,130,246,0.1)" stroke="#3b82f6" stroke-width="1"/>
+                    <text x="75" y="15" text-anchor="middle" font-size="9" fill="#1e3a8a">Match Event Type:</text>
+                    <text x="75" y="27" text-anchor="middle" font-size="10" fill="#1e40af">boot | telemetry | alert</text>
+                </g>
+            </g>
+
+            <!-- Arrow: Consumer -> MongoDB -->
+            <path d="M 1070 385 L 1070 505" stroke="#64748b" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+            <text x="1110" y="445" font-size="10" fill="#64748b">Persist</text>
+
+            <!-- LAYER 6: MongoDB -->
+            <g id="mongo-layer">
+                <rect x="920" y="505" width="300" height="150" rx="10" fill="url(#mongoGrad)" stroke="#00684A" stroke-width="3"/>
+                <text x="1070" y="535" text-anchor="middle" font-size="18" font-weight="bold" fill="white">MongoDB</text>
+                
+                <g transform="translate(940, 550)">
+                    <rect width="260" height="95" rx="5" fill="rgba(255,255,255,0.15)"/>
+                    <text x="130" y="22" text-anchor="middle" font-size="12" font-weight="bold" fill="white">Collection: sensor_data</text>
+                    <text x="20" y="45" font-size="10" fill="#dcfce7">📊 Type: Time Series</text>
+                    <text x="20" y="62" font-size="10" fill="#dcfce7">⏱️  timeField: timestamp</text>
+                    <text x="20" y="79" font-size="10" fill="#dcfce7">🔑 metaField: device_id</text>
+                </g>
+            </g>
+
+            <!-- Arrow: MongoDB -> Metrics -->
+            <path d="M 920 580 L 660 580 L 660 485" stroke="#64748b" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+            <text x="790" y="570" text-anchor="middle" font-size="10" fill="#64748b">Aggregations</text>
+
+            <!-- LAYER 7: Metrics Service -->
+            <g id="metrics-layer">
+                <rect x="540" y="485" width="240" height="130" rx="10" fill="#fae8ff" stroke="#a855f7" stroke-width="2"/>
+                <text x="660" y="515" text-anchor="middle" font-size="16" font-weight="bold" fill="#6b21a8">Metrics Service</text>
+                <text x="660" y="535" text-anchor="middle" font-size="11" fill="#7e22ce">Analytics API</text>
+                <g transform="translate(560, 545)">
+                    <rect width="200" height="58" rx="5" fill="rgba(168,85,247,0.1)" stroke="#a855f7" stroke-width="1"/>
+                    <text x="10" y="16" font-size="10" fill="#6b21a8">/metrics/boots</text>
+                    <text x="10" y="30" font-size="10" fill="#6b21a8">/metrics/temperature/avg</text>
+                    <text x="10" y="44" font-size="10" fill="#6b21a8">/metrics/alerts</text>
+                </g>
+            </g>
+
+            <!-- Arrow: Metrics -> Kong -->
+            <path d="M 540 550 L 430 550 L 430 190" stroke="#a855f7" stroke-width="2" fill="none" stroke-dasharray="5,5" marker-end="url(#arrowhead)"/>
+            <text x="485" y="540" text-anchor="middle" font-size="10" fill="#a855f7">Response</text>
+
+            <!-- Legend -->
+            <g transform="translate(50, 710)">
+                <text x="0" y="0" font-size="13" font-weight="bold" fill="#334155">Legend:</text>
+                
+                <line x1="0" y1="18" x2="35" y2="18" stroke="#22c55e" stroke-width="3"/>
+                <text x="45" y="23" font-size="10" fill="#64748b">Secure Channel (TLS/SASL)</text>
+                
+                <line x1="0" y1="35" x2="35" y2="35" stroke="#64748b" stroke-width="3"/>
+                <text x="45" y="40" font-size="10" fill="#64748b">Internal Communication</text>
+                
+                <line x1="0" y1="52" x2="35" y2="52" stroke="#a855f7" stroke-width="2" stroke-dasharray="5,5"/>
+                <text x="45" y="57" font-size="10" fill="#64748b">Response Path</text>
+            </g>
+
+            <!-- NFP Highlights -->
+            <g transform="translate(50, 790)">
+                <rect width="1300" height="90" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+                <text x="650" y="25" text-anchor="middle" font-size="14" font-weight="bold" fill="#166534">Non-Functional Properties (NFP)</text>
+                <text x="30" y="48" font-size="11" fill="#15803d">🔒 Security: API Key + TLS + SCRAM-SHA-512</text>
+                <text x="30" y="65" font-size="11" fill="#15803d">⚡ Fault Tolerance: Kafka Buffering | Self-Healing | MongoDB Replica</text>
+                <text x="30" y="82" font-size="11" fill="#15803d">📈 Scalability: HPA (1-4 replicas) | Load Balancing | Consumer Parallelism</text>
+                <text x="700" y="48" font-size="11" fill="#15803d">🛡️ Resilience: Replication Factor 2 | Min ISR 1</text>
+                <text x="700" y="65" font-size="11" fill="#15803d">🔧 IaC: Strimzi Operator | Kong CRDs | Helm Charts</text>
+            </g>
+        </svg>

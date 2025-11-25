@@ -56,7 +56,7 @@ cartelle_da_includere = [
     "Producer"
 ]
 
-file_output = "contenuto_prompt_NEW.txt"
+file_output = "contenuto_progetto_NEW.txt"
 
 stdout_originale = sys.stdout
 
