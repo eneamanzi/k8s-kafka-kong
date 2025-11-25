@@ -69,27 +69,27 @@ def safe_insert(event, event_description):
 def handle_boot(event):
     event = fix_timestamp(event)
     desc = f"[BOOT] Device {event.get('device_id')} attivo in zona {event.get('zone_id')}"
-    safe_insert(event, desc)
+    return safe_insert(event, desc)
 
 def handle_telemetry(event):
     event = fix_timestamp(event)
     desc = f"[TELEMETRY] Device {event.get('device_id')} -> Temp: {event.get('temperature')}°C, Hum: {event.get('humidity')}%"
-    safe_insert(event, desc)
+    return safe_insert(event, desc)
 
 def handle_firmware_update(event):
     event = fix_timestamp(event)
     desc = f"[UPDATE] Device {event.get('device_id')} aggiornamento a {event.get('update_to')}"
-    safe_insert(event, desc)
+    return safe_insert(event, desc)
 
 def handle_alert(event):
     event = fix_timestamp(event)
     desc = f"[ALERT] CRITICO: Device {event.get('device_id')} Code: {event.get('error_code')}"
-    safe_insert(event, desc)
+    return safe_insert(event, desc)
 
 def handle_unknown(event):
     event = fix_timestamp(event)
     desc = f"[IGNOTO] Tipo evento non gestito: {event.get('type')}"
-    safe_insert(event, desc)
+    return safe_insert(event, desc)
 
 # Inizializzazione Consumer
 consumer = KafkaConsumer(
