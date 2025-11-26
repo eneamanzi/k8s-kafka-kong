@@ -2,7 +2,7 @@
 
 **Studente:** Enea Manzi
 **Corso:** Cloud Computing Technologies \
-**Anno Accademico:** 2024/2025
+**Anno Accademico:** 2025/2026
 **Repository:** [GitHub Link](https://github.com/eneamanzi/k8s-kafka-kong)
 
 ## Indice
