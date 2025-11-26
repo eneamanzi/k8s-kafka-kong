@@ -607,20 +607,20 @@ Recupero password admin dal secret di mongo
 export MONGODB_ROOT_PASSWORD=$(kubectl get secret --namespace kafka mongo-mongodb -o jsonpath="{.data.mongodb-root-password}" | base64 -d)
 ```
 
-Trova tutte le collezioni presenti in student_events e cancella il loro contenuto una per una.
+Stampa il contenuto della Collection sensor_data
 ```bash
 kubectl exec -it deployment/mongo-mongodb -n kafka -- mongosh iot_network \
--u root -p $MONGODB_ROOT_PASSWORD \
---authenticationDatabase admin \
---eval "db.getCollectionNames().forEach(function(c){ db[c].deleteMany({}); print('Svuotata: ' + c); })"
+  -u root -p $MONGODB_ROOT_PASSWORD \
+  --authenticationDatabase admin \
+  --eval "printjson(db.sensor_data.find().toArray())"
 ```
 
-Cicla su tutte le collezioni e usa printjson per mostrare i dati formattati.
+Svuotare la collection sensor_data
 ```bash
 kubectl exec -it deployment/mongo-mongodb -n kafka -- mongosh iot_network \
--u root -p $MONGODB_ROOT_PASSWORD \
---authenticationDatabase admin \
---eval "db.getCollectionNames().forEach(function(c){ print('\n--- Collezione: ' + c + ' ---'); printjson(db[c].find().toArray()); })"
+  -u root -p $MONGODB_ROOT_PASSWORD \
+  --authenticationDatabase admin \
+  --eval "db.sensor_data.deleteMany({}); print('Svuotata sensor_data');"
 ```
 
 ## Non-Functional Property (NFP)
