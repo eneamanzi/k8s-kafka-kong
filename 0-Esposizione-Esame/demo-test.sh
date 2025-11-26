@@ -70,12 +70,24 @@ function cleanup_on_exit {
 trap cleanup_on_exit EXIT INT TERM
 
 # --- FUNZIONI HELPER ---
+
+# Funzione per stampare l'Header principale (Sezione)
 function print_header {
     clear
     echo -e "\n${BLUE}${BOLD}╔════════════════════════════════════════════════════════════════╗${RESET}"
     echo -e "${BLUE}${BOLD}║  $1${RESET}"
     echo -e "${BLUE}${BOLD}╚════════════════════════════════════════════════════════════════╝${RESET}"
     echo -e "${WHITE}$2${RESET}\n"
+}
+
+# NUOVA FUNZIONE HELPER: Per stampare le Sottosezioni (Test specifici)
+function print_subsection {
+    local title="$1"
+    local description="$2"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "${CYAN}${title}${RESET}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "${WHITE}${description}${RESET}\n"
 }
 
 function pause {
@@ -207,18 +219,12 @@ function test_auth {
 
     print_header "2. VERIFICA AUTENTICAZIONE" "Test policy di sicurezza Kong (Key-Auth)"
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST 2.A: Accesso NEGATO senza API Key${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Richiesta HTTP senza header 'apikey' deve essere rifiutata${RESET}\n"
+    print_subsection "TEST 2.A: Accesso NEGATO senza API Key" "Richiesta HTTP senza header 'apikey' deve essere rifiutata"
 
     CMD_AUTH_FAIL="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/boot -H 'Content-Type: application/json' -d '{\"device_id\":\"unauthorized-device\",\"zone_id\":\"unknown\"}'"
     run_test "$CMD_AUTH_FAIL" "401" "http_code"
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST 2.B: Accesso CONSENTITO con API Key valida${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Kong valida la chiave e inoltra la richiesta al backend${RESET}\n"
+    print_subsection "TEST 2.B: Accesso CONSENTITO con API Key valida" "Kong valida la chiave e inoltra la richiesta al backend"
 
     CMD_AUTH_OK="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/boot -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\":\"auth-test-device\",\"zone_id\":\"secure-lab\"}'"
     run_test "$CMD_AUTH_OK" "200" "http_code"
@@ -234,35 +240,22 @@ function test_ingestion {
 
     print_header "3. DATA INGESTION PIPELINE" "Test invio eventi IoT"
 
-    # ... (Test 3.1 - 3.4)
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST 3.1: Device Boot Event${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Simula: Sensore si accende e notifica il sistema${RESET}\n"
+    print_subsection "TEST 3.1: Device Boot Event" "Simula: Sensore si accende e notifica il sistema"
 
     CMD_BOOT="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/boot -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\":\"demo-sensor-01\",\"zone_id\":\"warehouse-A\",\"firmware\":\"v1.0\"}'"
     run_test "$CMD_BOOT" "200" "http_code"
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST 3.2: Telemetry Data (Condizioni Normali)${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Simula: Invio dati ambientali regolari (24.5°C, 45% umidità)${RESET}\n"
+    print_subsection "TEST 3.2: Telemetry Data (Condizioni Normali)" "Simula: Invio dati ambientali regolari (24.5°C, 45% umidità)"
 
     CMD_TEL_NORMAL="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/telemetry -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\":\"demo-sensor-01\",\"zone_id\":\"warehouse-A\",\"temperature\":24.5,\"humidity\":45}'"
     run_test "$CMD_TEL_NORMAL" "200" "http_code"
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST 3.3: Critical Alert${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Simula: Sensore rileva surriscaldamento critico${RESET}\n"
+    print_subsection "TEST 3.3: Critical Alert" "Simula: Sensore rileva surriscaldamento critico"
 
     CMD_ALERT="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/alert -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\":\"demo-sensor-02\",\"error_code\":\"CRITICAL_OVERHEAT\",\"severity\":\"high\"}'"
     run_test "$CMD_ALERT" "200" "http_code"
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST 3.4: Firmware Update${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Simula: Aggiornamento firmware sensore da v1.0 a v2.0${RESET}\n"
+    print_subsection "TEST 3.4: Firmware Update" "Simula: Aggiornamento firmware sensore da v1.0 a v2.0"
 
     CMD_FW="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/firmware_update -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\":\"demo-sensor-01\",\"version_to\":\"v2.0\"}'"
     run_test "$CMD_FW" "200" "http_code"
@@ -270,10 +263,7 @@ function test_ingestion {
     echo -e "${CYAN}Attendo propagazione dati: Kafka → Consumer → MongoDB (4 secondi)...${RESET}\n"
     sleep 4
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST 3.5: Verifica Processamento Consumer${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Consumer deve aver processato tutti gli eventi demo${RESET}\n"
+    print_subsection "TEST 3.5: Verifica Processamento Consumer" "Consumer deve aver processato tutti gli eventi demo"
 
     CMD_LOGS="kubectl logs -l app=consumer -n kafka --tail=50 | grep -E '(demo-sensor-01|demo-sensor-02)'"
     run_test "$CMD_LOGS" "demo-sensor-" "grep"
@@ -289,34 +279,22 @@ function test_security_secrets {
     
     print_header "NFP 1. SECURITY & SECRETS MANAGEMENT" "Verifica Defense in Depth"
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 1.1: Data in Transit - TLS Encryption${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Verifica comunicazione cifrata Producer/Consumer → Kafka${RESET}\n"
+    print_subsection "TEST NFP 1.1: Data in Transit - TLS Encryption" "Verifica comunicazione cifrata Producer/Consumer → Kafka"
 
     CMD_TLS="kubectl exec -i -n kafka iot-sensor-cluster-broker-0 -- openssl s_client -connect iot-sensor-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093 -brief < /dev/null 2>&1 | grep -E '(Protocol|Cipher)'"
     run_test "$CMD_TLS" "Protocol" "contains"
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 1.2: Authentication - SASL/SCRAM-SHA-512${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Credenziali Kafka in Secret Kubernetes (non hardcoded)${RESET}\n"
+    print_subsection "TEST NFP 1.2: Authentication - SASL/SCRAM-SHA-512" "Credenziali Kafka in Secret Kubernetes (non hardcoded)"
 
     CMD_SASL="kubectl get secret consumer-user -n kafka -o yaml | grep password"
     run_test "$CMD_SASL" "password" "contains"
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 1.3: MongoDB Secrets Management${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Password MongoDB offuscata (base64) in Secret${RESET}\n"
+    print_subsection "TEST NFP 1.3: MongoDB Secrets Management" "Password MongoDB offuscata (base64) in Secret"
 
     CMD_MONGO_SECRET="kubectl get secret -n kafka mongo-creds -o yaml | grep MONGO_PASSWORD"
     run_test "$CMD_MONGO_SECRET" "MONGO_PASSWORD" "contains"
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 1.4: ConfigMap Separation${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Hostname MongoDB in ConfigMap (pubblico, non sensibile)${RESET}\n"
+    print_subsection "TEST NFP 1.4: ConfigMap Separation" "Hostname MongoDB in ConfigMap (pubblico, non sensibile)"
 
     CMD_MONGO_CONFIG="kubectl get configmap -n kafka mongodb-config -o yaml | grep MONGO_HOST"
     run_test "$CMD_MONGO_CONFIG" "MONGO_HOST" "contains"
@@ -332,28 +310,19 @@ function test_resilience_ha {
 
     print_header "NFP 2. RESILIENZA & FAULT TOLERANCE" "Test Buffering e Self-Healing"
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 2.1: Fault Tolerance - Consumer Crash (Step 1/4)${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Simulazione crash Consumer per testare buffering Kafka${RESET}\n"
+    print_subsection "TEST NFP 2.1: Fault Tolerance - Consumer Crash (Step 1/4)" "Simulazione crash Consumer per testare buffering Kafka"
 
     CMD_CONSUMER_DOWN="kubectl scale deploy/consumer -n kafka --replicas=0"
     run_test "$CMD_CONSUMER_DOWN" "Eseguito" "none"
 
     sleep 2
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 2.1: Fault Tolerance - Consumer Crash (Step 2/4)${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Invio dati DURANTE downtime - Kafka deve fare da buffer${RESET}\n"
+    print_subsection "TEST NFP 2.1: Fault Tolerance - Consumer Crash (Step 2/4)" "Invio dati DURANTE downtime - Kafka deve fare da buffer"
 
     CMD_BUFFERED="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/telemetry -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\":\"buffer-test-device\",\"zone_id\":\"kafka-buffer-test\",\"temperature\":99.9,\"humidity\":99}'"
     run_test "$CMD_BUFFERED" "200" "http_code"
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 2.1: Fault Tolerance - Consumer Crash (Step 3/4)${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Recovery Consumer - Ripristino servizio${RESET}\n"
+    print_subsection "TEST NFP 2.1: Fault Tolerance - Consumer Crash (Step 3/4)" "Recovery Consumer - Ripristino servizio"
 
     CMD_CONSUMER_UP="kubectl scale deploy/consumer -n kafka --replicas=1"
     run_test "$CMD_CONSUMER_UP" "Eseguito" "none"
@@ -362,18 +331,12 @@ function test_resilience_ha {
     kubectl rollout status deployment/consumer -n kafka --timeout=60s >/dev/null 2>&1
     sleep 3
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 2.1: Fault Tolerance - Consumer Crash (Step 4/4)${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Zero Data Loss Verification - Messaggio bufferizzato deve essere processato${RESET}\n"
+    print_subsection "TEST NFP 2.1: Fault Tolerance - Consumer Crash (Step 4/4)" "Zero Data Loss Verification - Messaggio bufferizzato deve essere processato"
 
     CMD_VERIFY_BUFFER="kubectl logs -n kafka -l app=consumer --tail=30 | grep 'buffer-test-device'"
     run_test "$CMD_VERIFY_BUFFER" "buffer-test-device" "grep"
 
-    echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 2.2: High Availability - Self-Healing (Step 1/2)${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Kubernetes deve rilevare il crash e riavviare automaticamente il Pod${RESET}\n"
+    print_subsection "TEST NFP 2.2: High Availability - Self-Healing (Step 1/2)" "Kubernetes deve rilevare il crash e riavviare automaticamente il Pod"
 
     POD_PROD=$(kubectl get pod -l app=producer -n kafka -o jsonpath="{.items[0].metadata.name}")
     echo -e "${YELLOW}Pod target: ${WHITE}$POD_PROD${RESET}\n"
@@ -383,10 +346,7 @@ function test_resilience_ha {
 
     sleep 3
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 2.2: High Availability - Self-Healing (Step 2/2)${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Verifica nuovo Pod Running - Self-Healing completato${RESET}\n"
+    print_subsection "TEST NFP 2.2: High Availability - Self-Healing (Step 2/2)" "Verifica nuovo Pod Running - Self-Healing completato"
 
     CMD_NEW_POD="kubectl get pods -l app=producer -n kafka | grep -v Terminating"
     run_test "$CMD_NEW_POD" "Running" "grep"
@@ -402,10 +362,7 @@ function test_scaling_lb {
     
     print_header "NFP 3. SCALABILITÀ & LOAD BALANCING" "Test Scaling e Parallelismo"
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 3.1: Scale Out - Producer x2, Consumer x3${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Preparazione per test di carico distribuito${RESET}\n"
+    print_subsection "TEST NFP 3.1: Scale Out - Producer x2, Consumer x3" "Preparazione per test di carico distribuito"
 
     CMD_SCALE_OUT="kubectl scale deploy/producer -n kafka --replicas=2 && kubectl scale deploy/consumer -n kafka --replicas=3"
     run_test "$CMD_SCALE_OUT" "Eseguito" "none"
@@ -414,18 +371,12 @@ function test_scaling_lb {
     kubectl rollout status deployment/producer -n kafka --timeout=60s >/dev/null 2>&1
     kubectl rollout status deployment/consumer -n kafka --timeout=60s >/dev/null 2>&1
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 3.2: Verifica Pod Scalati${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Controllo distribuzione Pod su nodi (dovresti vedere 2 Producer e 3 Consumer in Running)${RESET}\n"
+    print_subsection "TEST NFP 3.2: Verifica Pod Scalati" "Controllo distribuzione Pod su nodi (dovresti vedere 2 Producer e 3 Consumer in Running)"
 
     CMD_CHECK_PODS="kubectl get pods -n kafka -l 'app in (producer,consumer)'"
     run_test "$CMD_CHECK_PODS" "Eseguito" "none"
 
-    echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 3.3: Burst Test - 50 richieste parallele${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Invio massivo per testare Load Balancing HTTP e Consumer Parallelism${RESET}\n"
+    print_subsection "TEST NFP 3.3: Burst Test - 50 richieste parallele" "Invio massivo per testare Load Balancing HTTP e Consumer Parallelism"
 
     for i in {1..50}; do
         curl -s -o /dev/null -X POST "http://producer.$IP.nip.io:$PORT/event/telemetry" \
@@ -438,36 +389,19 @@ function test_scaling_lb {
 
     sleep 3 # Aumentato a 3s per dare tempo ai consumer di processare
 
-    # ------------------------------------------------------------------------------------------------
-    # MODIFICA RICHIESTA: Verifica Producer (Load Balancing)
-    # ------------------------------------------------------------------------------------------------
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 3.4 (PRODUCER): Verifica Distribuzione Carico HTTP${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Analisi log Producer per confermare che le 50 richieste sono distribuite tra le 2 repliche (Nessun 'head -n' per vedere tutte le voci).${RESET}\n"
+    print_subsection "TEST NFP 3.4 (PRODUCER): Verifica Distribuzione Carico HTTP" "Analisi log Producer per confermare che le 50 richieste sono distribuite tra le 2 repliche (Nessun 'head -n' per vedere tutte le voci)."
 
     # Rimosso '| head -n 15'. Uso tail=100 per catturare tutte le 50 richieste.
     CMD_LB_PRODUCER_LOGS="kubectl logs -n kafka -l app=producer --tail=100 --prefix=true | grep 'lb-test-'"
     run_test "$CMD_LB_PRODUCER_LOGS" "lb-test-" "grep"
     
-    # ------------------------------------------------------------------------------------------------
-    # MODIFICA RICHIESTA: Verifica Consumer (Parallelismo)
-    # ------------------------------------------------------------------------------------------------
-    echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 3.5 (CONSUMER): Verifica Parallelismo Kafka${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Analisi log Consumer per confermare che le 50 richieste sono state processate dalle 3 repliche (dovresti vedere 3 nomi di Pod diversi, uno per partizione).${RESET}\n"
+    print_subsection "TEST NFP 3.5 (CONSUMER): Verifica Parallelismo Kafka" "Analisi log Consumer per confermare che le 50 richieste sono state processate dalle 3 repliche (dovresti vedere 3 nomi di Pod diversi, uno per partizione)."
 
     # Nuovo comando per i log Consumer
     CMD_LB_CONSUMER_LOGS="kubectl logs -n kafka -l app=consumer --tail=150 --prefix=true | grep 'lb-test-'" 
     run_test "$CMD_LB_CONSUMER_LOGS" "lb-test-" "grep"
     
-    # ------------------------------------------------------------------------------------------------
-
-    echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 3.6: Scale Down - Ritorno a configurazione base${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Ripristino Producer x1, Consumer x1${RESET}\n"
+    print_subsection "TEST NFP 3.6: Scale Down - Ritorno a configurazione base" "Ripristino Producer x1, Consumer x1"
 
     CMD_SCALE_DOWN="kubectl scale deploy/producer -n kafka --replicas=1 && kubectl scale deploy/consumer -n kafka --replicas=1"
     run_test "$CMD_SCALE_DOWN" "Eseguito" "none"
@@ -487,10 +421,7 @@ function test_hpa {
     read -r HPA_CHOICE
 
     if [[ "$HPA_CHOICE" =~ ^[sS]$ ]]; then
-        echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-        echo -e "${CYAN}TEST NFP 4.1: Deploy Configurazione HPA${RESET}"
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-        echo -e "${WHITE}Attivazione autoscaling basato su CPU (soglia 50%)${RESET}\n"
+        print_subsection "TEST NFP 4.1: Deploy Configurazione HPA" "Attivazione autoscaling basato su CPU (soglia 50%)"
         
         CMD_HPA_DEPLOY="kubectl apply -f ./K8s/hpa.yaml"
         run_test "$CMD_HPA_DEPLOY" "Eseguito" "none"
@@ -498,18 +429,12 @@ function test_hpa {
         
         sleep 3
         
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-        echo -e "${CYAN}TEST NFP 4.2: Verifica HPA Attivo${RESET}"
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-        echo -e "${WHITE}Controllo stato Horizontal Pod Autoscaler${RESET}\n"
+        print_subsection "TEST NFP 4.2: Verifica HPA Attivo" "Controllo stato Horizontal Pod Autoscaler"
         
         CMD_HPA_STATUS="kubectl get hpa -n kafka"
         run_test "$CMD_HPA_STATUS" "Eseguito" "none"
         
-        echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-        echo -e "${CYAN}TEST NFP 4.3: Stress Test - 5000 richieste${RESET}"
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-        echo -e "${WHITE}Generazione carico per triggerar autoscaling (può richiedere alcuni minuti)${RESET}\n"
+        print_subsection "TEST NFP 4.3: Stress Test - 5000 richieste" "Generazione carico per triggerar autoscaling (può richiedere alcuni minuti)"
         
         # Disabilito 'Exit on Error' per lo stress test
         set +e 
@@ -530,10 +455,7 @@ function test_hpa {
         
         echo -e "${GREEN}✓ Stress test completato${RESET}\n"
         
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-        echo -e "${CYAN}TEST NFP 4.4: Verifica Scale Out${RESET}"
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-        echo -e "${WHITE}Monitoraggio scaling automatico (30 secondi)${RESET}\n"
+        print_subsection "TEST NFP 4.4: Verifica Scale Out" "Monitoraggio scaling automatico (30 secondi)"
         
         sleep 30
         
@@ -554,10 +476,7 @@ function test_hpa {
             echo -e "${YELLOW}${BOLD}RISULTATO: Atteso: >1 replica → Ottenuto: $REPLICAS_AFTER replica (potrebbe richiedere più tempo) ⚠${RESET}\n"
         fi
         
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-        echo -e "${CYAN}TEST NFP 4.5: Verifica Scale Down${RESET}"
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-        echo -e "${WHITE}Attesa elasticità inversa - rilascio risorse (60 secondi)${RESET}\n"
+        print_subsection "TEST NFP 4.5: Verifica Scale Down" "Attesa elasticità inversa - rilascio risorse (60 secondi)"
         
         sleep 60
         
@@ -578,10 +497,7 @@ function test_rate_limit {
 
     print_header "NFP 5. RATE LIMITING (Kong)" "Protezione anti-DoS/Flood"
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 5.1: Applicazione Policy Rate Limiting${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Configurazione Kong: Max 5 req/sec per client${RESET}\n"
+    print_subsection "TEST NFP 5.1: Applicazione Policy Rate Limiting" "Configurazione Kong: Max 5 req/sec per client"
 
     cat <<'EOF' | kubectl apply -f - >/dev/null 2>&1
 apiVersion: configuration.konghq.com/v1
@@ -603,10 +519,7 @@ EOF
     echo -e "${CYAN}Attendo propagazione policy Kong (4 secondi)...${RESET}\n"
     sleep 4
 
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 5.2: Flood Test - 20 richieste rapide consecutive${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${WHITE}Simulazione attacco DoS - Kong deve bloccare richieste in eccesso${RESET}\n"
+    print_subsection "TEST NFP 5.2: Flood Test - 20 richieste rapide consecutive" "Simulazione attacco DoS - Kong deve bloccare richieste in eccesso"
 
     BLOCKED=0
     PASSED=0
@@ -630,9 +543,7 @@ EOF
     # Riabilita 'Exit on Error'
     set -e
 
-    echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${CYAN}TEST NFP 5.3: Analisi Risultati Flood Test${RESET}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
+    print_subsection "TEST NFP 5.3: Analisi Risultati Flood Test" ""
 
     echo -e "${YELLOW}OUTPUT:${RESET}"
     echo -e "${WHITE}┌────────────────────────────────────────────────────────────────┐${RESET}"
