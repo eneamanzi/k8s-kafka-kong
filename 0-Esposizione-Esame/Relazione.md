@@ -14,6 +14,8 @@
 - [5. MongoDB: Persistenza e Ottimizzazione Dati](#5-mongodb-persistenza-e-ottimizzazione-dati)
 - [6. Analisi delle Proprietà Non Funzionali (NFP)](#6-analisi-delle-proprietà-non-funzionali-nfp)
 - [7. Sfide Tecniche e Soluzioni](#7-sfide-tecniche-e-soluzioni)
+- [7.2 Garanzia di Consegna (At-Least-Once) e Idempotenza](#72-garanzia-di-consegna-at-least-once-e-idempotenza)
+- [7.3. Migrazione MongoDB a StatefulSet per Stabilità e Persistenza](#73-migrazione-mongodb-a-statefulset-per-stabilità-e-persistenza)
 - [8. Conclusioni e Raggiungimento Obiettivi](#8-conclusioni-e-raggiungimento-obiettivi)
 
 ## 1. Scenario e Obiettivi Architetturali
@@ -160,19 +162,24 @@ Terminato il picco, l’HPA ha ridotto il numero di Pod rilasciando le risorse e
 
 ## 7. Sfide Tecniche e Soluzioni
 
-### 7.1 Networking e Reachability degli Ingress (Docker Desktop vs Minikube)
-* **Problema:** Durante le fasi iniziali di test, l'utilizzo di **Docker Desktop** come driver per Kubernetes impediva l'accesso diretto ai servizi esposti tramite Ingress. A causa dell'isolamento di rete imposto dalla virtualizzazione di Docker Desktop, il "tunnel" verso l'IP del cluster non funzionava come previsto, rendendo irraggiungibili gli endpoint `producer` e `metrics`.
-* **Tentativi e Soluzione:** Inizialmente si è tentato di aggirare il problema DNS utilizzando il servizio **nip.io** (es. `producer.192.168.x.x.nip.io`) per mappare dinamicamente i nomi host. Tuttavia, questo non ha risolto il blocco di rete sottostante. La soluzione definitiva è stata migrare l'ambiente su **Minikube con driver nativo** (o Docker driver su Linux), che espone correttamente l'IP del cluster.
+### 7.1 Networking e Reachability degli Ingress
 
-### 7.2 Garanzia di Consegna e Idempotenza (At-Least-Once)
-* **Problema:** Kafka garantisce una semantica di consegna *At-Least-Once*. Esiste uno scenario di guasto specifico in cui il *Consumer* completa la scrittura su MongoDB ma crasha prima di confermare l'elaborazione al broker (commit dell'offset). Al riavvio, Kafka invia nuovamente lo stesso messaggio, causando potenzialmente la duplicazione dei dati di telemetria nel database.
-* **Analisi e Soluzione Architetturale:** Per mitigare il problema, il *Producer* è stato progettato implementando il pattern dell'**Idempotency Token**: ogni payload viene arricchito alla fonte con un UUID univoco (`event_id`) generato prima dell'invio.
-    Sebbene l'implementazione attuale del *Consumer* accetti la duplicazione (`insert_one`) per massimizzare il throughput di scrittura in uno scenario IoT massivo, l'architettura è già predisposta per garantire l'idempotenza stretta. Utilizzando l'`event_id` come chiave univoca (o chiave primaria `_id`) su MongoDB, il sistema può scartare automaticamente le scritture ridondanti derivanti dai retry di Kafka, garantendo la consistenza dei dati senza modifiche al protocollo di messaggistica.
+- **Problema:** L'uso di **Docker Desktop** come driver Kubernetes creava un isolamento di rete interno, bloccando l'accesso diretto ai servizi esposti tramite Ingress (endpoint `producer` e `metrics`). Il "tunnel" verso l'IP del cluster risultava inaccessibile.
 
-### 7.3. Migrazione MongoDB a StatefulSet per Stabilità e Persistenza
+- **Soluzione:** Dopo un tentativo fallito di usare `nip.io` per la mappatura dinamica dei nomi host, la risoluzione definitiva è stata la migrazione a un **driver nativo**. L'utilizzo di Minikube con un driver nativo ha permesso l'esposizione corretta dell'IP del cluster, ripristinando la connettività esterna necessaria per il testing.
+  
 
-* **Problema:** L'istanza di MongoDB, inizialmente implementata tramite un **Deployment** con un Volume Persistente (PVC), ha manifestato problemi di **blocco del rollout** e incoerenza operativa. Un Deployment è un costrutto *stateless* che non garantisce un'identità Pod stabile. Quando un Pod falliva, la sua sostituzione otteneva un **nome casuale e instabile**. Questa instabilità impediva al nuovo Pod di recuperare rapidamente la sua **Persistent Volume Claim (PVC)**. Poiché Kubernetes garantisce che la PVC sia montata su un solo Pod alla volta, il tentativo del Pod con la nuova identità di riacquisire la risorsa falliva, lasciando il Pod bloccato nello stato **Pending** e compromettendo la continuità del servizio.
-* **Soluzione Architetturale:** La migrazione a un **StatefulSet** ha risolto l'inconveniente, essendo questa la risorsa progettata per applicazioni *stateful* che richiedono **storage stabile**. Lo StatefulSet garantisce un'**identità Pod stabile** e prevedibile (es. **`mongo-mongodb-0`**), associata in modo univoco a una specifica **PVC**. Questo assicura che il Pod subentrante, mantenendo lo stesso nome, possa reclamare il disco senza conflitti e ripartire immediatamente. Come conseguenza minore di questa migrazione, il nome del servizio di rete interno è mutato in **`mongo-mongodb-headless`**, richiedendo un aggiornamento nel campo **`MONGO_HOST`** della **ConfigMap** per ristabilire la corretta connettività per tutti i microservizi.
+ ## 7.2 Garanzia di Consegna (At-Least-Once) e Idempotenza
+
+- **Problema:** La semantica di consegna **At-Least-Once** di Kafka genera il rischio di duplicazione: se il Consumer crasha dopo la scrittura su MongoDB ma prima del *commit* dell'offset, Kafka ritrasmette il messaggio. Questo può causare l'inserimento multiplo dello stesso dato di telemetria nel database.
+
+- **Soluzione:** È stato implementato l'**Idempotency Token** a livello di Producer, arricchendo ogni payload con un **UUID univoco** (`event_id`). **Attualmente, l'implementazione accetta la duplicazione (tramite `insert_one`) per massimizzare il *throughput* in uno scenario IoT massivo.** Tuttavia, l'architettura è predisposta per l'idempotenza stretta: usando l'`event_id` come chiave univoca in MongoDB, il database scarterebbe automaticamente le scritture ridondanti, garantendo la consistenza dei dati a discapito di una leggera riduzione della performance di scrittura.
+
+## 7.3. Migrazione MongoDB a StatefulSet per Stabilità e Persistenza
+
+- **Problema:** Gestire MongoDB (un'applicazione stateful) con un **Deployment** stateless ha causato instabilità. L'identità **instabile e casuale** dei Pod nei Deployment non permetteva al Pod sostitutivo, in caso di *failure*, di reclamare la sua **Persistent Volume Claim (PVC)** precedentemente associata. Dato che Kubernetes permette un solo *mount* della PVC, il Pod rimaneva bloccato nello stato `Pending`, interrompendo la continuità del servizio.
+
+- **Soluzione:** La migrazione a un **StatefulSet** ha risolto il problema. Questo costrutto garantisce un'**identità Pod stabile e prevedibile** (es. `mongo-mongodb-0`) univocamente associata a una specifica PVC. In caso di riavvio o fallimento, il Pod mantiene la stessa identità, potendo così **riacquisire il disco immediatamente e senza conflitti**. Questo ha richiesto solo un aggiornamento del campo `MONGO_HOST` nella `ConfigMap` per riflettere il nuovo servizio di rete interno (`mongo-mongodb-headless`).
 
 ## 8. Conclusioni e Raggiungimento Obiettivi
 
