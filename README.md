@@ -654,17 +654,7 @@ echo "API Key: $API_KEY"
 
 **Obiettivo:** Verificare la cifratura del canale (TLS), l'autenticazione (SASL) e la protezione delle credenziali.
 
-1.  **Verifica TLS (Data in Transit):**
-    Controlla che la comunicazione col broker avvenga su canale cifrato.
-
-    ```bash
-    kubectl exec -it -n kafka iot-sensor-cluster-broker-0 -- \
-      openssl s_client -connect iot-sensor-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093 -brief </dev/null
-    ```
-
-    > **Expectation:** Output contenente `Protocol version: TLSv1.3` e Cipher Suite robusta (es. `TLS_AES_256_GCM_SHA384`).
-
-2.  **Verifica Authentication:**
+- **Verifica Authentication:**
     Tenta una connessione senza credenziali per confermare che venga rifiutata, fallisce restituendo `No API key found in request` o `Unauthorized`.
 
     ```bash
@@ -680,17 +670,32 @@ echo "API Key: $API_KEY"
       -d '{"device_id": "test-sensor", "zone_id": "lab", "firmware": "v1.0"}'
     ```
 
-3.  **Verifica Kubernetes Secrets/ConfigMap:** Verifica che le credenziali non siano in chiaro e che la configurazione sia separata.
+
+1.  **Verifica TLS (Data in Transit):**
+    Controlla che la comunicazione col broker avvenga su canale cifrato.
+    ```bash
+    kubectl exec -it -n kafka iot-sensor-cluster-broker-0 -- \
+      openssl s_client -connect iot-sensor-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093 -brief </dev/null
+    ```
+    > **Expectation:** Output contenente `Protocol version: TLSv1.3` e Cipher Suite robusta (es. `TLS_AES_256_GCM_SHA384`).
+
+2.  **Authentication - SASL/SCRAM-SHA-512:** Credenziali Kafka in Secret Kubernetes (non hardcoded)   
+    ```bash
+    kubectl get secret consumer-user -n kafka -o yaml | grep password
+    ```
+
+3.  **MongoDB Secrets Management:** Verifica che le credenziali non siano in chiaro (Password MongoDB offuscata (base64) in Secret) 
     ```bash
     # Verifica Secret (credenziali cifrate)
     kubectl get secret -n kafka mongo-creds -o yaml | grep "MONGO_"
+    ```
+    > * Nel Secret, i valori `MONGO_USER`e `MONGO_PASSWORD` sono in base64 (non leggibili direttamente).
 
+4.  **MongoDB ConfigMap Separation:** Verifica che la configurazione sia separata.
+    ```bash
     # Verifica ConfigMap (configurazione in chiaro)
     kubectl get configmap -n kafka mongodb-config -o yaml | grep "MONGO_"
     ```
-
-    > Expectation: 
-    > * Nel Secret, i valori `MONGO_USER`e `MONGO_PASSWORD` sono in base64 (non leggibili direttamente).
     > * Nella ConfigMap, i valori `MONGO_HOST`, `MONGO_PORT`, ecc. sono in chiaro (OK, non sono sensibili)
 
 ### 2\. **Resilience, Fault Tolerance & High Availability**
