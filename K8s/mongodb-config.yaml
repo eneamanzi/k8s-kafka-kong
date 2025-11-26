@@ -4,7 +4,7 @@ metadata:
   name: mongodb-config
   namespace: kafka
 data:
-  MONGO_HOST: "mongo-mongodb.kafka.svc.cluster.local"
+  MONGO_HOST: "mongo-mongodb-headless.kafka.svc.cluster.local"
   MONGO_PORT: "27017"
   MONGO_DATABASE: "iot_network"
   MONGO_AUTH_SOURCE: "iot_network"
@@ -15,7 +15,7 @@ metadata:
   name: mongodb-config
   namespace: metrics
 data:
-  MONGO_HOST: "mongo-mongodb.kafka.svc.cluster.local"
+  MONGO_HOST: "mongo-mongodb-headless.kafka.svc.cluster.local"
   MONGO_PORT: "27017"
   MONGO_DATABASE: "iot_network"
   MONGO_AUTH_SOURCE: "iot_network"

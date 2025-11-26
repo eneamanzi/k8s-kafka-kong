@@ -181,16 +181,24 @@ kubectl create namespace kafka
 
 <div style="margin-left: 40px;">
 
-**Installiamo MongoDB** usando Helm.
+**Installiamo MongoDB** usando Helm come **StatefulSet**.
 
 ```bash
 helm repo add bitnami https://charts.bitnami.com/bitnami
-helm install mongo-mongodb bitnami/mongodb --namespace kafka --version 18.1.1
+
+helm install mongo-mongodb bitnami/mongodb --namespace kafka --version 18.1.1 \
+    --set architecture=replicaset \
+    --set replicaCount=1 \
+    --set arbiter.enabled=false \
+    --set auth.enabled=true
 ```
 >*Se l'installazione fallisce per errori di connessione, riprovare*
 
 Attendiamo il compeltamento (Premi CTRL+C quando vedi Running)
 ```bash
+# Verifica lo StatefulSet
+kubectl get sts -n kafka
+# Verifica i Pods
 kubectl get pods -n kafka -l app.kubernetes.io/name=mongodb -w
 ```
 
@@ -209,7 +217,7 @@ kubectl get pods -n kafka -l app.kubernetes.io/name=mongodb -w
 2.  **Accedi alla shell di Mongo:**
 
     ```bash
-    kubectl exec -it deployment/mongo-mongodb -n kafka -- mongosh -u root -p $MONGODB_ROOT_PASSWORD --authenticationDatabase admin
+    kubectl exec -it statefulset/mongo-mongodb -n kafka -- mongosh -u root -p $MONGODB_ROOT_PASSWORD --authenticationDatabase admin
     ```
 
 3.  **Creazione utente**
@@ -253,7 +261,7 @@ kubectl get pods -n kafka -l app.kubernetes.io/name=mongodb -w
     db.getCollectionInfos();
     ```
 
-    Le applicazioni useranno questa stringa di connessione: `mongodb://db_user:segreta@mongo-mongodb.kafka.svc.cluster.local:27017/iot_network?authSource=iot_network`
+    Le applicazioni useranno questa stringa di connessione: `mongodb://db_user:segreta@mongo-mongodb-headless.kafka.svc.cluster.local:27017/iot_network?authSource=iot_network`
 
 #### 3.2\. Configurazione ConfigMap e Secret (per Producer Consumer e Metrics-service)
 
@@ -359,11 +367,11 @@ kubectl rollout restart deployment/metrics-service -n metrics
 ```
 
 Per riavviare tutti i deployment in un namespace:
-
 ```bash
 kubectl rollout restart deployment -n kafka
 kubectl rollout restart deployment -n metrics
 ```
+
 </div>
 
 ### 6\. Autenticazione: API Key
@@ -607,9 +615,11 @@ Recupero password admin dal secret di mongo
 export MONGODB_ROOT_PASSWORD=$(kubectl get secret --namespace kafka mongo-mongodb -o jsonpath="{.data.mongodb-root-password}" | base64 -d)
 ```
 
+
+
 Stampa il contenuto della Collection sensor_data
 ```bash
-kubectl exec -it deployment/mongo-mongodb -n kafka -- mongosh iot_network \
+kubectl exec -it statefulset/mongo-mongodb -n kafka -- mongosh iot_network \
   -u root -p $MONGODB_ROOT_PASSWORD \
   --authenticationDatabase admin \
   --eval "printjson(db.sensor_data.find().toArray())"
@@ -617,7 +627,7 @@ kubectl exec -it deployment/mongo-mongodb -n kafka -- mongosh iot_network \
 
 Svuotare la collection sensor_data
 ```bash
-kubectl exec -it deployment/mongo-mongodb -n kafka -- mongosh iot_network \
+kubectl exec -it statefulset/mongo-mongodb -n kafka -- mongosh iot_network \
   -u root -p $MONGODB_ROOT_PASSWORD \
   --authenticationDatabase admin \
   --eval "db.sensor_data.deleteMany({}); print('Svuotata sensor_data');"
