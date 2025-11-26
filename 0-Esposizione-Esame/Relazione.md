@@ -51,13 +51,14 @@ Questa scelta sostituisce la dipendenza da **ZooKeeper**, internalizzando la ges
 
   
 ### 3.2 Strategia dei Topic e Trade-off
-* **Topic `sensor-telemetry` (Alta Efficienza):** Destinato ai flussi massivi (Telemetria, Boot, Update), configurato con **3 partizioni** per massimizzare il **parallelismo** di lettura (fino a 3 consumer concorrenti).
-    * **Strategia di Compressione Ibrida (LZ4):** È stato scelto **LZ4** per il *Transport Layer* grazie al suo bassissimo overhead sulla CPU e alta velocità di decompressione. Questo, per i flussi IoT in tempo reale, riduce l'occupazione di banda (fino al 60% per payload JSON ripetitivi) e previene colli di bottiglia sul Producer, integrandosi perfettamente con lo *Storage Layer* (MongoDB) che applica successivamente la compressione **Zstd** per l'efficienza dello storage a lungo termine.
-    * **Retention:** Limitata a 7 giorni per mantenere disponibili i dati operativi "caldi" (replay/analisi immediata), delegando lo storico profondo a MongoDB.
+
+**Topic `sensor-telemetry` (Alta Efficienza):** Destinato ai flussi massivi (Telemetria, Boot, Update), configurato con **3 partizioni** per massimizzare il **parallelismo** di lettura (fino a 3 consumer concorrenti).
+* **Strategia di Compressione Ibrida (LZ4):** È stato scelto **LZ4** per il *Transport Layer* grazie al suo bassissimo overhead sulla CPU e alta velocità di decompressione. Questo, per i flussi IoT in tempo reale, riduce l'occupazione di banda (fino al 60% per payload JSON ripetitivi) e previene colli di bottiglia sul Producer, integrandosi perfettamente con lo *Storage Layer* (MongoDB) che applica successivamente la compressione **Zstd** per l'efficienza dello storage a lungo termine.
+* **Retention:** Limitata a 7 giorni per mantenere disponibili i dati operativi "caldi" (replay/analisi immediata), delegando lo storico profondo a MongoDB.
   
-* **Topic `sensor-alerts` (Alta Affidabilità):** Destinato esclusivamente agli allarmi.
-    * **Durabilità (Zero Data Loss):** Configurato con `min.insync.replicas: 2` e `replicas: 2`. Questo garantisce che **nessun allarme venga perso** anche in caso di crash improvviso di un broker, ma richiede che entrambe le repliche siano online per accettare scritture (trade-off: disponibilità ridotta durante manutenzioni).
-    * **Retention:** Estesa a 30 giorni per permettere analisi post-incidente e audit.
+**Topic `sensor-alerts` (Alta Affidabilità):** Destinato esclusivamente agli allarmi.
+* **Durabilità (Zero Data Loss):** Configurato con `min.insync.replicas: 2` e `replicas: 2`. Questo garantisce che **nessun allarme venga perso** anche in caso di crash improvviso di un broker, ma richiede che entrambe le repliche siano online per accettare scritture (trade-off: disponibilità ridotta durante manutenzioni).
+* **Retention:** Estesa a 30 giorni per permettere analisi post-incidente e audit.
 
 
 

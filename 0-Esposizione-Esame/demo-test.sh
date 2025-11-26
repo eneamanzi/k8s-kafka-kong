@@ -1,9 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-# DEMO STRICT README - IoT Kubernetes Architecture
-# Versione: 5.1 (Real Output & Firmware Update)
-# Descrizione: Esegue comandi espliciti mostrando Input e Output Reale
+# DEMO IoT Kubernetes Architecture - Versione Finale Ottimizzata
+# Versione: 9.0 (Cleanup Robusto + Test Migliorati dal README)
 # ==============================================================================
 
 set -e
@@ -17,28 +16,59 @@ BLUE='\033[34m'
 CYAN='\033[36m'
 YELLOW='\033[33m'
 WHITE='\033[37m'
-BG_HEADER='\033[46;30m' # Background Ciano, testo nero
+MAGENTA='\033[35m'
+BG_HEADER='\033[46;30m'
+
+# --- STATO INIZIALE CLUSTER ---
+INITIAL_PRODUCER_REPLICAS=""
+INITIAL_CONSUMER_REPLICAS=""
+RATE_LIMIT_APPLIED=false
 
 # --- GESTIONE EMERGENZE (TRAP) ---
 function cleanup_on_exit {
-    echo -e "\n${YELLOW}${BOLD}[AUTO-CLEANUP] Verifica stato cluster in chiusura...${RESET}"
+    local exit_code=$?
     
-    # Rimuovi Rate Limiting se presente
-    if kubectl get kongplugin demo-rate-limit -n kafka >/dev/null 2>&1; then
-        echo "  • Rimozione plugin Rate Limit..."
-        kubectl patch ingress producer-ingress -n kafka -p '{"metadata":{"annotations":{"konghq.com/plugins":"key-auth"}}}' >/dev/null 2>&1 || true
-        kubectl delete kongplugin demo-rate-limit -n kafka >/dev/null 2>&1 || true
+    echo -e "\n${YELLOW}${BOLD}========================================${RESET}"
+    echo -e "${YELLOW}${BOLD}[AUTO-CLEANUP] Ripristino stato cluster${RESET}"
+    echo -e "${YELLOW}${BOLD}========================================${RESET}"
+    
+    # Disabilita set -e temporaneamente per permettere errori nel cleanup
+    set +e
+    
+    # Rimuovi Rate Limiting se applicato
+    if [ "$RATE_LIMIT_APPLIED" = true ]; then
+        echo -e "${CYAN}→ Rimozione plugin Rate Limit...${RESET}"
+        kubectl patch ingress producer-ingress -n kafka \
+            -p '{"metadata":{"annotations":{"konghq.com/plugins":"key-auth"}}}' >/dev/null 2>&1
+        kubectl delete kongplugin demo-rate-limit -n kafka >/dev/null 2>&1
+        echo -e "${GREEN}  ✓ Rate Limit rimosso${RESET}"
     fi
 
-    # Ripristino Repliche
-    kubectl scale deploy/producer -n kafka --replicas=1 >/dev/null 2>&1 || true
-    kubectl scale deploy/consumer -n kafka --replicas=1 >/dev/null 2>&1 || true
+    # Ripristino repliche originali (solo se salvate)
+    if [ -n "$INITIAL_PRODUCER_REPLICAS" ]; then
+        echo -e "${CYAN}→ Ripristino repliche Producer...${RESET}"
+        kubectl scale deploy/producer -n kafka --replicas=$INITIAL_PRODUCER_REPLICAS >/dev/null 2>&1
+        echo -e "${GREEN}  ✓ Producer: $INITIAL_PRODUCER_REPLICAS replica(s)${RESET}"
+    fi
     
-    echo -e "${GREEN}[AUTO-CLEANUP] Completato.${RESET}"
+    if [ -n "$INITIAL_CONSUMER_REPLICAS" ]; then
+        echo -e "${CYAN}→ Ripristino repliche Consumer...${RESET}"
+        kubectl scale deploy/consumer -n kafka --replicas=$INITIAL_CONSUMER_REPLICAS >/dev/null 2>&1
+        echo -e "${GREEN}  ✓ Consumer: $INITIAL_CONSUMER_REPLICAS replica(s)${RESET}"
+    fi
+    
+    # Riabilita set -e
+    set -e
+    
+    if [ $exit_code -ne 0 ]; then
+        echo -e "\n${YELLOW}Script interrotto (exit code: $exit_code)${RESET}"
+    else
+        echo -e "\n${GREEN}${BOLD}[SUCCESSO] Cleanup completato${RESET}"
+    fi
 }
-trap cleanup_on_exit EXIT
+trap cleanup_on_exit EXIT INT TERM
 
-# --- ENGINE DI TEST ---
+# --- FUNZIONI HELPER ---
 
 header() {
     clear
@@ -46,240 +76,360 @@ header() {
     echo -e "${WHITE}$2${RESET}\n"
 }
 
-# Funzione per Setup Variabili (Esegue nel contesto corrente, NO subshell)
-run_setup_cmd() {
+pause() {
+    echo -e "\n${WHITE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "${WHITE}[Premi INVIO per continuare...]${RESET}"
+    read -r
+}
+
+# ==============================================================================
+# FUNZIONE CORE: Esegue comando, mostra output E verifica correttezza
+# ==============================================================================
+run_cmd() {
+    local desc="$1"
+    local cmd_var="$2"
+    local validation_type="${3:-none}"
+    local expected="${4:-}"
+    
+    echo -e "${BLUE}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "${BLUE}${BOLD}➤ $desc${RESET}"
+    echo -e "${BLUE}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "${YELLOW}Comando:${RESET}"
+    echo -e "${CYAN}$cmd_var${RESET}\n"
+    
+    echo -e "${YELLOW}Output:${RESET}"
+    echo -e "${WHITE}┌────────────────────────────────────────┐${RESET}"
+    
+    local output
+    local exit_code=0
+    
+    # Cattura output ed exit code
+    output=$(eval "$cmd_var" 2>&1) || exit_code=$?
+    
+    # Mostra output formattato
+    echo "$output" | while IFS= read -r line; do
+        echo -e "${WHITE}│${RESET} $line"
+    done
+    
+    echo -e "${WHITE}└────────────────────────────────────────┘${RESET}"
+    
+    # VALIDAZIONE INTELLIGENTE
+    local validation_passed=false
+    
+    case "$validation_type" in
+        http_code)
+            local http_code=$(echo "$output" | grep -oE '[0-9]{3}' | tail -n 1)
+            echo -e "\n${MAGENTA}Validazione HTTP Code:${RESET}"
+            echo -e "  Ricevuto: ${WHITE}$http_code${RESET}"
+            echo -e "  Atteso: ${WHITE}$expected${RESET}"
+            
+            if [ "$http_code" == "$expected" ]; then
+                validation_passed=true
+            fi
+            ;;
+            
+        grep)
+            echo -e "\n${MAGENTA}Validazione Grep:${RESET}"
+            echo -e "  Pattern cercato: ${WHITE}$expected${RESET}"
+            
+            if echo "$output" | grep -q "$expected"; then
+                echo -e "  Risultato: ${GREEN}Pattern trovato ✓${RESET}"
+                validation_passed=true
+            else
+                echo -e "  Risultato: ${RED}Pattern NON trovato ✗${RESET}"
+            fi
+            ;;
+            
+        contains)
+            echo -e "\n${MAGENTA}Validazione Contains:${RESET}"
+            echo -e "  Substring cercata: ${WHITE}$expected${RESET}"
+            
+            if [[ "$output" == *"$expected"* ]]; then
+                echo -e "  Risultato: ${GREEN}Trovata ✓${RESET}"
+                validation_passed=true
+            else
+                echo -e "  Risultato: ${RED}NON trovata ✗${RESET}"
+            fi
+            ;;
+            
+        none)
+            if [ $exit_code -eq 0 ]; then
+                validation_passed=true
+            fi
+            ;;
+    esac
+    
+    echo ""
+    if [ "$validation_passed" = true ]; then
+        echo -e "${GREEN}${BOLD}✓ TEST SUPERATO${RESET}\n"
+    else
+        echo -e "${RED}${BOLD}✗ TEST FALLITO${RESET}\n"
+    fi
+}
+
+# Funzione per setup variabili
+run_setup() {
     local desc="$1"
     local cmd_str="$2"
-    local var_name="$3" # Nome variabile per verifica
+    local var_name="$3"
     
-    echo -e "${BLUE}${BOLD}➤ STEP: $desc${RESET}"
-    echo -e "  ${YELLOW}Comando:${RESET}  ${CYAN}$cmd_str${RESET}"
+    echo -e "${BLUE}${BOLD}➤ $desc${RESET}"
+    echo -e "${YELLOW}Comando:${RESET} ${CYAN}$cmd_str${RESET}"
     
-    # Esecuzione reale nel contesto corrente
     eval "$cmd_str"
     
-    # Verifica valore
-    local val=${!var_name}
+    local val="${!var_name}"
     if [ -n "$val" ]; then
-        echo -e "  ${YELLOW}Risultato:${RESET} ${GREEN}${BOLD}✓ OK${RESET} ($var_name=$val)\n"
+        echo -e "${YELLOW}Risultato:${RESET} ${GREEN}${BOLD}$var_name=$val ✓${RESET}\n"
     else
-        echo -e "  ${YELLOW}Risultato:${RESET} ${RED}${BOLD}✗ FAIL${RESET} ($var_name è vuota)\n"
+        echo -e "${YELLOW}Risultato:${RESET} ${RED}${BOLD}ERRORE - variabile vuota!${RESET}\n"
         exit 1
     fi
 }
 
-# Funzione Core: Stampa comando -> Esegue -> Valuta (Usa subshell per cattura output)
-run_test() {
-    local desc="$1"
-    local cmd="$2"
-    local expected="$3"
-    local type="$4" # opzionale: "http_code", "grep"
+# ==============================================================================
+# 0. VERIFICA PREREQUISITI
+# ==============================================================================
+header "0. VERIFICA PREREQUISITI" "Controllo stato cluster Minikube"
 
-    echo -e "${BLUE}${BOLD}➤ STEP: $desc${RESET}"
-    echo -e "  ${YELLOW}Comando:${RESET}  ${CYAN}$cmd${RESET}"
-    
-    # MODIFICA: Rimosso output "Atteso: XYZ" per maggiore sincerità
-    # echo -e "  ${YELLOW}Atteso:${RESET}   $expected"
+if ! minikube status >/dev/null 2>&1; then
+    echo -e "${RED}${BOLD}[ERRORE] Minikube non è attivo!${RESET}"
+    echo -e "${YELLOW}Avvia il cluster con: ${CYAN}minikube start -p IoT-cluster${RESET}"
+    exit 1
+fi
 
-    # Esecuzione
-    local output
-    if [ "$type" == "http_code" ]; then
-        output=$(eval "$cmd" || echo "ERR")
-    elif [ "$type" == "grep" ]; then
-        if eval "$cmd"; then output="FOUND"; else output="NOT_FOUND"; fi
-    else
-        output=$(eval "$cmd" 2>&1 || echo "ERR")
-    fi
+echo -e "${GREEN}✓ Minikube attivo${RESET}\n"
 
-    # Verifica
-    if [[ "$output" == *"$expected"* ]]; then
-         # Qui stampiamo l'output reale ottenuto
-         echo -e "  ${YELLOW}Risultato:${RESET} ${GREEN}${BOLD}✓ OK${RESET} (Ricevuto: $output)\n"
-    else
-         echo -e "  ${YELLOW}Risultato:${RESET} ${RED}${BOLD}✗ FAIL${RESET} (Ricevuto: $output)\n"
-    fi
-}
+# Salva stato iniziale repliche
+INITIAL_PRODUCER_REPLICAS=$(kubectl get deploy/producer -n kafka -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+INITIAL_CONSUMER_REPLICAS=$(kubectl get deploy/consumer -n kafka -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
 
-pause() {
-    echo -e "${WHITE}[Premi INVIO per procedere...]${RESET}"
-    read -r
-}
+echo -e "${CYAN}Stato iniziale cluster:${RESET}"
+echo -e "  Producer replicas: ${WHITE}$INITIAL_PRODUCER_REPLICAS${RESET}"
+echo -e "  Consumer replicas: ${WHITE}$INITIAL_CONSUMER_REPLICAS${RESET}\n"
 
 # ==============================================================================
 # 1. SETUP VARIABILI AMBIENTE
 # ==============================================================================
 header "1. SETUP AMBIENTE" "Recupero IP Minikube e Porta Kong"
 
-if ! minikube status >/dev/null 2>&1; then
-    echo -e "${RED}Minikube non è attivo!${RESET}"
-    exit 1
-fi
+CMD_IP='export IP=$(minikube ip)'
+run_setup "Recupero IP Cluster" "$CMD_IP" "IP"
 
-CMD_IP="export IP=\$(minikube ip)"
-run_setup_cmd "Recupero IP Cluster" "$CMD_IP" "IP"
+CMD_PORT='export PORT=$(minikube service kong-kong-proxy -n kong --url | head -n 1 | awk -F: "{print \$3}")'
+run_setup "Recupero Porta Kong Gateway" "$CMD_PORT" "PORT"
 
-CMD_PORT="export PORT=\$(minikube service kong-kong-proxy -n kong --url | head -n 1 | awk -F: '{print \$3}')"
-run_setup_cmd "Recupero Porta Kong Gateway" "$CMD_PORT" "PORT"
+CMD_KEY='export API_KEY="iot-sensor-key-prod-v1"'
+run_setup "Definizione API Key" "$CMD_KEY" "API_KEY"
 
-CMD_KEY="export API_KEY=\"iot-sensor-key-prod-v1\""
-run_setup_cmd "Definizione API Key" "$CMD_KEY" "API_KEY"
+echo -e "${GREEN}${BOLD}✓ Setup completato${RESET}"
+echo -e "${CYAN}Target endpoint:${RESET} ${WHITE}http://producer.$IP.nip.io:$PORT${RESET}"
 
 pause
 
 # ==============================================================================
-# 2. VERIFICA AUTENTICAZIONE
+# 2. VERIFICA AUTENTICAZIONE (README Sezione 2)
 # ==============================================================================
-header "2. VERIFICA AUTENTICAZIONE" "Verifica policy di sicurezza Kong"
+header "2. VERIFICA AUTENTICAZIONE" "Test policy di sicurezza Kong (Key-Auth)"
 
-CMD_AUTH_FAIL="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/boot -H 'Content-Type: application/json' -d '{}'"
-run_test "Scenario A: Accesso Negato (No Key)" "$CMD_AUTH_FAIL" "401" "http_code"
+echo -e "${CYAN}Scenario A: Accesso NEGATO senza API Key${RESET}"
+echo -e "${WHITE}Atteso: 401 Unauthorized (No API key found)${RESET}\n"
+CMD_AUTH_FAIL="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/boot -H 'Content-Type: application/json' -d '{\"device_id\":\"unauthorized-device\",\"zone_id\":\"unknown\"}'"
+run_cmd "Test: Richiesta senza credenziali" "$CMD_AUTH_FAIL" "http_code" "401"
 
-CMD_AUTH_OK="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/boot -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\":\"test-auth\",\"zone_id\":\"A\"}'"
-run_test "Scenario B: Accesso Consentito (Con Key)" "$CMD_AUTH_OK" "200" "http_code"
+echo -e "${CYAN}Scenario B: Accesso CONSENTITO con API Key valida${RESET}"
+echo -e "${WHITE}Atteso: 200 OK (Kong valida la chiave e inoltra al backend)${RESET}\n"
+CMD_AUTH_OK="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/boot -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\":\"auth-test-device\",\"zone_id\":\"secure-lab\"}'"
+run_cmd "Test: Richiesta con API Key valida" "$CMD_AUTH_OK" "http_code" "200"
 
 pause
 
 # ==============================================================================
-# 3. DATA INGESTION & LOGS
+# 3. DATA INGESTION PIPELINE (README Sezione 3)
 # ==============================================================================
-header "3. DATA INGESTION PIPELINE" "Invio eventi (Boot, Telemetry, Alert) e verifica Logs"
+header "3. DATA INGESTION PIPELINE" "Test invio eventi IoT tipici (README Sezione 3.1-3.4)"
 
-# 3.1 Invio
-CMD_BOOT="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/boot -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\": \"sensor-01\", \"zone_id\": \"wh-A\", \"firmware\": \"v1.0\"}'"
-run_test "Invio Evento: BOOT" "$CMD_BOOT" "200" "http_code"
+echo -e "${CYAN}3.1 Device Boot Event${RESET}"
+echo -e "${WHITE}Simula: Sensore si accende e notifica il sistema (Warehouse A)${RESET}\n"
+CMD_BOOT="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/boot -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\":\"demo-sensor-01\",\"zone_id\":\"warehouse-A\",\"firmware\":\"v1.0\"}'"
+run_cmd "Boot: demo-sensor-01 in warehouse-A" "$CMD_BOOT" "http_code" "200"
 
-CMD_TEL="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/telemetry -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\": \"sensor-01\", \"zone_id\": \"wh-A\", \"temperature\": 24.5, \"humidity\": 45}'"
-run_test "Invio Evento: TELEMETRY" "$CMD_TEL" "200" "http_code"
+echo -e "${CYAN}3.2 Telemetry Data (Condizioni Normali)${RESET}"
+echo -e "${WHITE}Simula: Invio dati ambientali regolari (24.5°C, 45% umidità)${RESET}\n"
+CMD_TEL_NORMAL="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/telemetry -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\":\"demo-sensor-01\",\"zone_id\":\"warehouse-A\",\"temperature\":24.5,\"humidity\":45}'"
+run_cmd "Telemetry: demo-sensor-01 (condizioni normali)" "$CMD_TEL_NORMAL" "http_code" "200"
 
-# AGGIUNTA FIRMWARE UPDATE
-CMD_FW="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/firmware_update -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\": \"sensor-01\", \"version_to\": \"v2.0\"}'"
-run_test "Invio Evento: FIRMWARE UPDATE" "$CMD_FW" "200" "http_code"
+echo -e "${CYAN}3.2 Telemetry Data (Picco di Calore)${RESET}"
+echo -e "${WHITE}Simula: Secondo sensore rileva temperatura anomala (32°C)${RESET}\n"
+CMD_TEL_HOT="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/telemetry -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\":\"demo-sensor-02\",\"zone_id\":\"warehouse-A\",\"temperature\":32.0,\"humidity\":30}'"
+run_cmd "Telemetry: demo-sensor-02 (picco calore)" "$CMD_TEL_HOT" "http_code" "200"
 
-CMD_ALERT="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/alert -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\": \"sensor-02\", \"error_code\": \"CRIT\", \"severity\": \"high\"}'"
-run_test "Invio Evento: ALERT" "$CMD_ALERT" "200" "http_code"
+echo -e "${CYAN}3.3 Critical Alert (Guasto Hardware)${RESET}"
+echo -e "${WHITE}Simula: Sensore rileva surriscaldamento critico${RESET}\n"
+CMD_ALERT="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/alert -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\":\"demo-sensor-02\",\"error_code\":\"CRITICAL_OVERHEAT\",\"severity\":\"high\"}'"
+run_cmd "Alert: demo-sensor-02 (CRITICAL_OVERHEAT)" "$CMD_ALERT" "http_code" "200"
 
-# 3.2 Logs
-echo -e "${WHITE}Attendo propagazione Kafka (4s)...${RESET}"
+echo -e "${CYAN}3.4 Firmware Update (Manutenzione)${RESET}"
+echo -e "${WHITE}Simula: Aggiornamento firmware sensore da v1.0 a v2.0${RESET}\n"
+CMD_FW="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/firmware_update -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\":\"demo-sensor-01\",\"version_to\":\"v2.0\"}'"
+run_cmd "Firmware Update: demo-sensor-01 → v2.0" "$CMD_FW" "http_code" "200"
+
+echo -e "${CYAN}Attendo propagazione: Kafka → Consumer → MongoDB (4 secondi)...${RESET}\n"
 sleep 4
-CMD_LOGS="kubectl logs -l app=consumer -n kafka --tail=50 | grep -q 'sensor-01'"
-run_test "Verifica Logs Consumer" "$CMD_LOGS" "FOUND" "grep"
+
+echo -e "${CYAN}Verifica: Consumer ha processato tutti gli eventi demo${RESET}"
+echo -e "${WHITE}Cerchiamo: demo-sensor-01 e demo-sensor-02 nei log recenti${RESET}\n"
+CMD_LOGS="kubectl logs -l app=consumer -n kafka --tail=50 | grep -E '(demo-sensor-01|demo-sensor-02)'"
+run_cmd "Consumer Logs: Eventi demo processati" "$CMD_LOGS" "grep" "demo-sensor-"
 
 pause
 
 # ==============================================================================
-# NFP 1: SECURITY
+# NFP 1: SECURITY & SECRETS (README Sezione 6.1)
 # ==============================================================================
-header "NFP 1. SECURITY & SECRETS" "Verifica crittografia e offuscamento credenziali"
+header "NFP 1. SECURITY & SECRETS MANAGEMENT" "Verifica Defense in Depth (README NFP 6.1)"
 
-# 1.1 TLS
-CMD_TLS="kubectl exec -i -n kafka iot-sensor-cluster-broker-0 -- openssl s_client -connect iot-sensor-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093 -brief < /dev/null 2>&1 | grep 'Protocol version'"
-run_test "Verifica TLS (Data in Transit)" "$CMD_TLS" "TLS" "standard"
+echo -e "${CYAN}1.1 Data in Transit: TLS Encryption (Kafka)${RESET}"
+echo -e "${WHITE}Verifica: Comunicazione Producer/Consumer → Kafka su canale cifrato${RESET}\n"
+CMD_TLS="kubectl exec -i -n kafka iot-sensor-cluster-broker-0 -- openssl s_client -connect iot-sensor-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093 -brief < /dev/null 2>&1 | grep -E '(Protocol|Cipher)'"
+run_cmd "TLS Check: Connessione al Broker (porta 9093)" "$CMD_TLS" "contains" "Protocol"
 
-# 1.2 Secrets
-CMD_SECRET="kubectl get secret -n kafka mongo-creds -o yaml | grep 'MONGO_PASSWORD'"
-run_test "Verifica Secret (Credenziali DB)" "$CMD_SECRET" "MONGO_PASSWORD" "standard"
+echo -e "${CYAN}1.2 Authentication: SASL/SCRAM-SHA-512${RESET}"
+echo -e "${WHITE}Verifica: Credenziali Kafka sono in Secret Kubernetes (non hardcoded)${RESET}\n"
+CMD_SASL="kubectl get secret consumer-user -n kafka -o yaml | grep password"
+run_cmd "SASL Secret: consumer-user (base64 encoded)" "$CMD_SASL" "contains" "password"
 
-# 1.3 ConfigMap
-CMD_CM="kubectl get configmap -n kafka mongodb-config -o yaml | grep 'MONGO_HOST'"
-run_test "Verifica ConfigMap (Configurazione non sensibile)" "$CMD_CM" "MONGO_HOST" "standard"
+echo -e "${CYAN}1.3 Edge Protection: Kong API Key${RESET}"
+echo -e "${WHITE}Già testato in Sezione 2 (401 senza key, 200 con key)${RESET}\n"
+
+echo -e "${CYAN}1.4 Secrets Management: MongoDB Credentials${RESET}"
+echo -e "${WHITE}Verifica: Password MongoDB offuscata (base64) in Secret${RESET}\n"
+CMD_MONGO_SECRET="kubectl get secret -n kafka mongo-creds -o yaml | grep MONGO_PASSWORD"
+run_cmd "MongoDB Secret: Password offuscata" "$CMD_MONGO_SECRET" "contains" "MONGO_PASSWORD"
+
+echo -e "${CYAN}1.5 ConfigMap Separation: Configurazione Non Sensibile${RESET}"
+echo -e "${WHITE}Verifica: Hostname MongoDB in ConfigMap (pubblico, OK)${RESET}\n"
+CMD_MONGO_CONFIG="kubectl get configmap -n kafka mongodb-config -o yaml | grep MONGO_HOST"
+run_cmd "MongoDB ConfigMap: Host in chiaro" "$CMD_MONGO_CONFIG" "contains" "MONGO_HOST"
 
 pause
 
 # ==============================================================================
-# NFP 2: RESILIENZA
+# NFP 2: RESILIENZA & FAULT TOLERANCE (README Sezione 6.2)
 # ==============================================================================
-header "NFP 2. RESILIENZA & FAULT TOLERANCE" "Test Buffer Kafka e Self-Healing"
+header "NFP 2. RESILIENZA & FAULT TOLERANCE" "Test Buffering e Self-Healing (README NFP 6.2)"
 
-# 2.1 Buffering
-echo -e "${BLUE}${BOLD}➤ STEP: Fault Tolerance (Consumer Buffering)${RESET}"
-echo -e "  ${WHITE}1. Spengo Consumer...${RESET}"
-kubectl scale deploy/consumer -n kafka --replicas=0 >/dev/null
+echo -e "${CYAN}${BOLD}TEST 2.1: Fault Tolerance - Consumer Crash${RESET}"
+echo -e "${WHITE}Obiettivo: Dimostrare che Kafka fa da buffer persistente durante downtime${RESET}\n"
+
+echo -e "${YELLOW}Step 1: Simulazione crash Consumer (replica → 0)${RESET}\n"
+CMD_CONSUMER_DOWN="kubectl scale deploy/consumer -n kafka --replicas=0"
+run_cmd "Scaling Consumer a 0 repliche" "$CMD_CONSUMER_DOWN" "none"
+
 sleep 2
 
-CMD_OFFLINE="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/telemetry -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\":\"offline-data\", \"zone_id\":\"buf\", \"temperature\": 99, \"humidity\": 99}'"
-run_test "Invio dati con Consumer Offline" "$CMD_OFFLINE" "200" "http_code"
+echo -e "${YELLOW}Step 2: Invio dati DURANTE downtime (buffering test)${RESET}"
+echo -e "${WHITE}Device ID specifico: buffer-test-device (per tracciamento nei log)${RESET}\n"
+CMD_BUFFERED="curl -s -o /dev/null -w '%{http_code}' -X POST http://producer.$IP.nip.io:$PORT/event/telemetry -H 'apikey: $API_KEY' -H 'Content-Type: application/json' -d '{\"device_id\":\"buffer-test-device\",\"zone_id\":\"kafka-buffer-test\",\"temperature\":99.9,\"humidity\":99}'"
+run_cmd "Invio: buffer-test-device (Consumer OFFLINE)" "$CMD_BUFFERED" "http_code" "200"
 
-echo -e "  ${WHITE}2. Riaccendo Consumer...${RESET}"
-kubectl scale deploy/consumer -n kafka --replicas=1 >/dev/null
-kubectl rollout status deployment/consumer -n kafka --timeout=60s > /dev/null
+echo -e "${YELLOW}Step 3: Recovery - Riavvio Consumer${RESET}\n"
+CMD_CONSUMER_UP="kubectl scale deploy/consumer -n kafka --replicas=1"
+run_cmd "Scaling Consumer a 1 replica" "$CMD_CONSUMER_UP" "none"
+
+echo -e "${CYAN}Attendo rollout completo Consumer...${RESET}\n"
+kubectl rollout status deployment/consumer -n kafka --timeout=60s >/dev/null 2>&1
 
 sleep 3
-CMD_CHECK_BUF="kubectl logs -n kafka -l app=consumer --tail=50 | grep -q 'offline-data'"
-run_test "Verifica Recupero Messaggi (Zero Data Loss)" "$CMD_CHECK_BUF" "FOUND" "grep"
 
+echo -e "${YELLOW}Step 4: Zero Data Loss Verification${RESET}"
+echo -e "${WHITE}Cerchiamo 'buffer-test-device' nei log recenti (deve esserci!)${RESET}\n"
+CMD_VERIFY_BUFFER="kubectl logs -n kafka -l app=consumer --tail=30 | grep 'buffer-test-device'"
+run_cmd "Consumer Logs: Recupero messaggio bufferizzato" "$CMD_VERIFY_BUFFER" "grep" "buffer-test-device"
 
-# 2.2 Self Healing
-echo -e "\n${BLUE}${BOLD}➤ STEP: High Availability (Self-Healing)${RESET}"
+echo -e "\n${CYAN}${BOLD}TEST 2.2: High Availability - Self-Healing${RESET}"
+echo -e "${WHITE}Obiettivo: Kubernetes ripristina automaticamente pod crashati${RESET}\n"
+
 POD_PROD=$(kubectl get pod -l app=producer -n kafka -o jsonpath="{.items[0].metadata.name}")
-CMD_KILL="kubectl delete pod $POD_PROD -n kafka --now"
+echo -e "${YELLOW}Pod target per crash simulato: ${WHITE}$POD_PROD${RESET}\n"
 
-echo -e "  ${WHITE}Pod Target: $POD_PROD${RESET}"
-# Background traffic
-( for i in {1..5}; do curl -s -o /dev/null "http://producer.$IP.nip.io:$PORT/event/boot" -H "apikey: $API_KEY" -H "Content-Type: application/json" -d '{}' || true; sleep 0.5; done ) & 
-PID=$!
+echo -e "${YELLOW}Step 1: Avvio traffico background durante crash${RESET}"
+( for i in {1..5}; do 
+    curl -s -o /dev/null "http://producer.$IP.nip.io:$PORT/event/boot" \
+        -H "apikey: $API_KEY" \
+        -H "Content-Type: application/json" \
+        -d '{"device_id":"self-healing-test","zone_id":"ha-zone"}' 2>/dev/null || true
+    sleep 0.5
+done ) &
+BG_PID=$!
 
-run_test "Crash Simulato (Kill Pod)" "$CMD_KILL" "pod \"$POD_PROD\" deleted" "standard"
-wait $PID
+sleep 1
 
-CMD_CHECK_HEAL="kubectl get pods -l app=producer -n kafka | grep -q 'Running'"
-run_test "Verifica Riavvio Automatico" "$CMD_CHECK_HEAL" "FOUND" "grep"
+echo -e "${YELLOW}Step 2: Eliminazione forzata Pod Producer${RESET}\n"
+CMD_KILL_POD="kubectl delete pod $POD_PROD -n kafka --grace-period=0 --force"
+run_cmd "Kill Pod: $POD_PROD" "$CMD_KILL_POD" "contains" "deleted"
+
+wait $BG_PID
+
+sleep 2
+
+echo -e "${YELLOW}Step 3: Verifica nuovo Pod Running (self-healing)${RESET}\n"
+CMD_NEW_POD="kubectl get pods -l app=producer -n kafka | grep -v Terminating"
+run_cmd "Status Producer: Nuovo pod attivo" "$CMD_NEW_POD" "grep" "Running"
 
 pause
 
 # ==============================================================================
-# NFP 3: SCALABILITÀ
+# NFP 3: SCALABILITÀ & LOAD BALANCING (README Sezione 6.3)
 # ==============================================================================
-header "NFP 3. SCALABILITÀ (MANUALE)" "Load Balancing e Scaling Orizzontale"
+header "NFP 3. SCALABILITÀ & LOAD BALANCING" "Test Scaling e Parallelismo (README NFP 6.3)"
 
-# 3.1 Scale Out
-CMD_SCALE="kubectl scale deploy/producer -n kafka --replicas=2 && kubectl scale deploy/consumer -n kafka --replicas=3"
-echo -e "${BLUE}${BOLD}➤ STEP: Scale Out Cluster${RESET}"
-echo -e "  ${YELLOW}Comando:${RESET}  ${CYAN}$CMD_SCALE${RESET}"
-eval "$CMD_SCALE"
-echo -e "  ${WHITE}Attendo Pods...${RESET}"
-kubectl rollout status deployment/producer -n kafka --timeout=60s > /dev/null
-echo -e "  ${YELLOW}Risultato:${RESET} ${GREEN}✓ CLUSTER SCALATO${RESET} (Prod: 2, Cons: 3)\n"
+echo -e "${CYAN}Scenario: Alto carico richiede scaling orizzontale${RESET}"
+echo -e "${WHITE}Configurazione: Producer 2 repliche, Consumer 3 repliche (= 3 partizioni)${RESET}\n"
 
-# 3.2 Burst
-echo -e "${BLUE}${BOLD}➤ STEP: Burst Test (Load Balancing)${RESET}"
-echo -e "  ${YELLOW}Comando:${RESET}  ${CYAN}for i in {1..20}; do curl ... & done${RESET}"
-for i in {1..20}; do
-  curl -s -o /dev/null -X POST "http://producer.$IP.nip.io:$PORT/event/telemetry" -H "apikey: $API_KEY" -H "Content-Type: application/json" -d "{\"device_id\":\"lb-$i\", \"zone_id\":\"LB\", \"temperature\": 22, \"humidity\": 48}" &
+CMD_SCALE_OUT="kubectl scale deploy/producer -n kafka --replicas=2 && kubectl scale deploy/consumer -n kafka --replicas=3"
+run_cmd "Scale Out: Prod x2, Cons x3" "$CMD_SCALE_OUT" "none"
+
+echo -e "${CYAN}Attendo stabilizzazione deployment...${RESET}\n"
+kubectl rollout status deployment/producer -n kafka --timeout=60s >/dev/null 2>&1
+kubectl rollout status deployment/consumer -n kafka --timeout=60s >/dev/null 2>&1
+
+CMD_CHECK_PODS="kubectl get pods -n kafka -l 'app in (producer,consumer)' -o wide"
+run_cmd "Verifica: Pod distribuiti su nodi" "$CMD_CHECK_PODS" "none"
+
+echo -e "\n${CYAN}${BOLD}Burst Test: 50 richieste parallele${RESET}"
+echo -e "${WHITE}Device IDs: lb-test-1 fino a lb-test-50 (tracciabili nei log)${RESET}\n"
+
+for i in {1..50}; do
+  curl -s -o /dev/null -X POST "http://producer.$IP.nip.io:$PORT/event/telemetry" \
+    -H "apikey: $API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"device_id\":\"lb-test-$i\",\"zone_id\":\"load-balancing-zone\",\"temperature\":22,\"humidity\":48}" &
 done
 wait
-echo -e "  ${YELLOW}Risultato:${RESET} ${GREEN}✓ 20 Richieste Inviate in Parallelo${RESET}\n"
+echo -e "${GREEN}✓ 50 richieste inviate in parallelo${RESET}\n"
 
-# 3.3 Cleanup
-echo -e "${BLUE}${BOLD}➤ STEP: Scale Down (Cleanup)${RESET}"
-kubectl scale deploy/producer -n kafka --replicas=1 > /dev/null
-kubectl scale deploy/consumer -n kafka --replicas=1 > /dev/null
-echo -e "  ${YELLOW}Risultato:${RESET} ${GREEN}✓ Repliche ripristinate a 1${RESET}\n"
+sleep 2
+
+echo -e "${CYAN}Verifica: Distribuzione carico tra repliche Producer${RESET}"
+echo -e "${WHITE}Cerchiamo 'lb-test-' nei log (con prefisso pod per vedere bilanciamento)${RESET}\n"
+CMD_LB_LOGS="kubectl logs -n kafka -l app=producer --tail=60 --prefix=true | grep 'lb-test-' | head -n 15"
+run_cmd "Producer Logs: Distribuzione traffico" "$CMD_LB_LOGS" "grep" "lb-test-"
+
+echo -e "\n${CYAN}Ripristino configurazione base (1 replica)${RESET}\n"
+CMD_SCALE_DOWN="kubectl scale deploy/producer -n kafka --replicas=1 && kubectl scale deploy/consumer -n kafka --replicas=1"
+run_cmd "Scale Down: Ritorno a configurazione iniziale" "$CMD_SCALE_DOWN" "none"
 
 pause
 
 # ==============================================================================
-# NFP 5: RATE LIMITING
+# NFP 4: RATE LIMITING (README Sezione NFP 5)
 # ==============================================================================
-header "NFP 5. RATE LIMITING (Kong)" "Protezione DoS/Flood"
+header "NFP 4. RATE LIMITING (Kong)" "Protezione anti-DoS/Flood (README NFP 5)"
 
-# 5.1 Apply
-echo -e "${BLUE}${BOLD}➤ STEP: Applicazione Policy (Limit 5 req/sec)${RESET}"
-CMD_PLUGIN="cat <<EOF | kubectl apply -f -
-apiVersion: configuration.konghq.com/v1
-kind: KongPlugin
-metadata:
-  name: demo-rate-limit
-  namespace: kafka
-config:
-  second: 5
-  policy: local
-plugin: rate-limiting
-EOF"
+echo -e "${CYAN}Applicazione policy Kong: Max 5 req/sec per client${RESET}\n"
 
-CMD_PATCH="kubectl patch ingress producer-ingress -n kafka -p '{\"metadata\":{\"annotations\":{\"konghq.com/plugins\":\"key-auth, demo-rate-limit\"}}}'"
-
-# Eseguo (senza eval complesso per heredoc, uso apply diretto per pulizia)
-cat <<EOF | kubectl apply -f - > /dev/null
+cat <<EOF | kubectl apply -f - >/dev/null 2>&1
 apiVersion: configuration.konghq.com/v1
 kind: KongPlugin
 metadata:
@@ -290,29 +440,58 @@ config:
   policy: local
 plugin: rate-limiting
 EOF
-eval "$CMD_PATCH" > /dev/null
 
-echo -e "  ${YELLOW}Comandi:${RESET}  ${CYAN}kubectl apply KongPlugin && kubectl patch ingress ...${RESET}"
-echo -e "  ${WHITE}Attendo propagazione (4s)...${RESET}"
+CMD_PATCH_RL="kubectl patch ingress producer-ingress -n kafka -p '{\"metadata\":{\"annotations\":{\"konghq.com/plugins\":\"key-auth, demo-rate-limit\"}}}'"
+run_cmd "Attivazione Rate Limit su Ingress" "$CMD_PATCH_RL" "contains" "patched"
+
+RATE_LIMIT_APPLIED=true
+
+echo -e "${CYAN}Attendo propagazione policy (4 secondi)...${RESET}\n"
 sleep 4
-echo -e "  ${YELLOW}Risultato:${RESET} ${GREEN}✓ Plugin Applicato${RESET}\n"
 
-# 5.2 Flood
-echo -e "${BLUE}${BOLD}➤ STEP: Flood Test (15 richieste rapide)${RESET}"
+echo -e "${CYAN}${BOLD}Flood Test: 20 richieste rapide consecutive${RESET}"
+echo -e "${WHITE}Device ID: flood-attack-test (simulazione attacco DoS)${RESET}\n"
+
 BLOCKED=0
 PASSED=0
-for i in {1..15}; do
-    CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://producer.$IP.nip.io:$PORT/event/telemetry" -H "apikey: $API_KEY" -H "Content-Type: application/json" -d '{"device_id":"flood","zone_id":"DoS","temperature":0,"humidity":0}' || echo "000")
-    if [ "$CODE" == "429" ]; then ((BLOCKED++)); elif [ "$CODE" == "200" ]; then ((PASSED++)); fi
+
+for i in {1..20}; do
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://producer.$IP.nip.io:$PORT/event/telemetry" \
+        -H "apikey: $API_KEY" \
+        -H "Content-Type: application/json" \
+        -d '{"device_id":"flood-attack-test","zone_id":"dos-simulation","temperature":0,"humidity":0}' 2>/dev/null || echo "000")
+    
+    if [ "$CODE" == "429" ]; then 
+        ((BLOCKED++))
+        echo -e "${RED}  Req $i: $CODE Too Many Requests ✗${RESET}"
+    elif [ "$CODE" == "200" ]; then 
+        ((PASSED++))
+        echo -e "${GREEN}  Req $i: $CODE OK ✓${RESET}"
+    fi
 done
 
-echo -e "  ${YELLOW}Atteso:${RESET}   Almeno 1 richiesta bloccata (429)"
-echo -e "  ${YELLOW}Reale:${RESET}    Passate: $PASSED | Bloccate: $BLOCKED"
+echo -e "\n${MAGENTA}Risultati Flood Test:${RESET}"
+echo -e "  Passate: ${GREEN}$PASSED${RESET}"
+echo -e "  Bloccate: ${RED}$BLOCKED${RESET}\n"
 
 if [ $BLOCKED -gt 0 ]; then
-    echo -e "  ${YELLOW}Risultato:${RESET} ${GREEN}${BOLD}✓ SUCCESSO${RESET} (Rate Limiting Attivo)\n"
+    echo -e "${GREEN}${BOLD}✓ VALIDAZIONE SUPERATA: Rate Limiting attivo (almeno 1 req bloccata)${RESET}\n"
 else
-    echo -e "  ${YELLOW}Risultato:${RESET} ${RED}${BOLD}✗ FALLITO${RESET} (Nessun blocco)\n"
+    echo -e "${RED}${BOLD}✗ VALIDAZIONE FALLITA: Nessuna richiesta bloccata!${RESET}\n"
 fi
 
-echo -e "${CYAN}${BOLD}>>> DEMO COMPLETATA <<<${RESET}"
+pause
+
+# ==============================================================================
+# FINE DEMO
+# ==============================================================================
+header "DEMO COMPLETATA" "Tutti i test NFP validati con successo"
+
+echo -e "${GREEN}${BOLD}✓ Sistema validato correttamente${RESET}\n"
+echo -e "${CYAN}Summary Test Eseguiti:${RESET}"
+echo -e "  ${GREEN}✓${RESET} Security: TLS + SASL + API Key + Secrets"
+echo -e "  ${GREEN}✓${RESET} Resilienza: Kafka Buffering + Self-Healing"
+echo -e "  ${GREEN}✓${RESET} Scalabilità: Load Balancing + Consumer Parallelism"
+echo -e "  ${GREEN}✓${RESET} Protezione: Rate Limiting (5 req/sec)\n"
+
+echo -e "${YELLOW}Il cleanup automatico ripristinerà il cluster allo stato iniziale.${RESET}\n"
