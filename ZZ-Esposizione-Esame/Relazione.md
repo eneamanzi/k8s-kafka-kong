@@ -13,7 +13,7 @@
 - [4. Kong API Gateway: Edge Computing \& Security](#4-kong-api-gateway-edge-computing--security)
 - [5. MongoDB: Persistenza e Ottimizzazione Dati](#5-mongodb-persistenza-e-ottimizzazione-dati)
 - [6. Analisi delle Proprietà Non Funzionali (NFP)](#6-analisi-delle-proprietà-non-funzionali-nfp)
-- [7. Conclusioni e Raggiungimento Obiettivi](#7-conclusioni-e-raggiungimento-obiettivi)
+- [8. Conclusioni e Raggiungimento Obiettivi](#8-conclusioni-e-raggiungimento-obiettivi)
 
 ## 1. Scenario e Obiettivi Architetturali
 
@@ -117,7 +117,18 @@ La validazione delle capacità di scaling è stata condotta in due fasi distinte
     * **Scale Out:** Rilevare la saturazione della CPU e avviare automaticamente nuove repliche (fino al limite configurato di 4) per assorbire il picco.
     * **Scale Down:** Rilasciare le risorse terminando i Pod in eccesso al termine del carico, riportando il cluster allo stato operativo standard e garantendo l'efficienza dei costi.
 
-## 7. Conclusioni e Raggiungimento Obiettivi
+### 7. Sfide Tecniche e Soluzioni
+
+#### 7.1 Networking e Reachability degli Ingress (Docker Desktop vs Minikube)
+* **Problema:** Durante le fasi iniziali di test, l'utilizzo di **Docker Desktop** come driver per Kubernetes impediva l'accesso diretto ai servizi esposti tramite Ingress. A causa dell'isolamento di rete imposto dalla virtualizzazione di Docker Desktop, il "tunnel" verso l'IP del cluster non funzionava come previsto, rendendo irraggiungibili gli endpoint `producer` e `metrics`.
+* **Tentativi e Soluzione:** Inizialmente si è tentato di aggirare il problema DNS utilizzando il servizio **nip.io** (es. `producer.192.168.x.x.nip.io`) per mappare dinamicamente i nomi host. Tuttavia, questo non ha risolto il blocco di rete sottostante. La soluzione definitiva è stata migrare l'ambiente su **Minikube con driver nativo** (o Docker driver su Linux), che espone correttamente l'IP del cluster.
+
+### 7.2 Garanzia di Consegna e Idempotenza (At-Least-Once)
+* **Problema:** Kafka garantisce una semantica di consegna *At-Least-Once*. Esiste uno scenario di guasto specifico in cui il *Consumer* completa la scrittura su MongoDB ma crasha prima di confermare l'elaborazione al broker (commit dell'offset). Al riavvio, Kafka invia nuovamente lo stesso messaggio, causando potenzialmente la duplicazione dei dati di telemetria nel database.
+* **Analisi e Soluzione Architetturale:** Per mitigare il problema, il *Producer* è stato progettato implementando il pattern dell'**Idempotency Token**: ogni payload viene arricchito alla fonte con un UUID univoco (`event_id`) generato prima dell'invio.
+    Sebbene l'implementazione attuale del *Consumer* accetti la duplicazione (`insert_one`) per massimizzare il throughput di scrittura in uno scenario IoT massivo, l'architettura è già predisposta per garantire l'idempotenza stretta. Utilizzando l'`event_id` come chiave univoca (o chiave primaria `_id`) su MongoDB, il sistema può scartare automaticamente le scritture ridondanti derivanti dai retry di Kafka, garantendo la consistenza dei dati senza modifiche al protocollo di messaggistica.
+
+## 8. Conclusioni e Raggiungimento Obiettivi
 
 Il progetto ha soddisfatto i requisiti architetturali richiesti, validando l'efficacia del modello a microservizi su Kubernetes:
 
@@ -125,6 +136,3 @@ Il progetto ha soddisfatto i requisiti architetturali richiesti, validando l'eff
 2.  **API Gateway (Project 3):** L'uso di Kong ha evidenziato i vantaggi del pattern *Gateway Offloading* rispetto all'esposizione diretta dei servizi: la centralizzazione di **Load Balancing**, **Autenticazione** e **Rate Limiting** all'edge ha ridotto la complessità dei microservizi backend.
 
 In conclusione, l'integrazione di strategie di **Compressione Ibrida** (LZ4/Zstd) e storage **Time Series** ha consegnato un'infrastruttura non solo resiliente, ma ottimizzata per gestire la scalabilità futura dei carichi IoT.
-
-
-
