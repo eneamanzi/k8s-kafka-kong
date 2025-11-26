@@ -1,7 +1,7 @@
 # Relazione di Progetto: Architettura Microservizi Event-Driven per Monitoraggio IoT su Kubernetes
 
 **Studente:** Enea Manzi
-**Corso:** Cloud Computing Technologies
+**Corso:** Cloud Computing Technologies \
 **Anno Accademico:** 2024/2025
 **Repository:** [GitHub Link](https://github.com/eneamanzi/k8s-kafka-kong)
 
@@ -13,6 +13,7 @@
 - [4. Kong API Gateway: Edge Computing \& Security](#4-kong-api-gateway-edge-computing--security)
 - [5. MongoDB: Persistenza e Ottimizzazione Dati](#5-mongodb-persistenza-e-ottimizzazione-dati)
 - [6. Analisi delle Proprietà Non Funzionali (NFP)](#6-analisi-delle-proprietà-non-funzionali-nfp)
+- [7. Sfide Tecniche e Soluzioni](#7-sfide-tecniche-e-soluzioni)
 - [8. Conclusioni e Raggiungimento Obiettivi](#8-conclusioni-e-raggiungimento-obiettivi)
 
 ## 1. Scenario e Obiettivi Architetturali
@@ -68,8 +69,13 @@ L'esposizione diretta dei microservizi è considerata un anti-pattern in ambient
 
 ### 4.1 Sicurezza Dichiarativa "As Code"
 La sicurezza è definita tramite risorse Kubernetes (CRD - Custom Resource Definitions).
-* **Autenticazione (Key-Auth):** Tramite il plugin `KongPlugin` di tipo `key-auth`, Kong intercetta ogni richiesta in ingresso. Verifica la presenza dell'header `apikey` e lo confronta con i *Secret* Kubernetes (`iot-devices-apikey`). Solo se la chiave è valida, la richiesta viene inoltrata al backend. Questo approccio permette di revocare l'accesso a dispositivi compromessi semplicemente aggiornando il Secret, senza dover ridistribuire o riavviare i microservizi.
-* **Protezione (Rate Limiting):** L'architettura supporta l'applicazione dinamica di policy di Rate Limiting per mitigare attacchi Denial of Service (DoS), proteggendo i servizi backend da picchi anomali di traffico.
+
+**Autenticazione (Key-Auth):** \
+Tramite il plugin `KongPlugin` di tipo `key-auth`, Kong intercetta ogni richiesta in ingresso. Verifica la presenza dell'header `apikey` e lo confronta con i *Secret* Kubernetes (`iot-devices-apikey`). Solo se la chiave è valida, la richiesta viene inoltrata al backend. Questo approccio permette di revocare l'accesso a dispositivi compromessi semplicemente aggiornando il Secret, senza dover ridistribuire o riavviare i microservizi.
+
+**Protezione (Rate Limiting):** \
+ L'architettura supporta l'applicazione dinamica di policy di Rate Limiting per mitigare attacchi Denial of Service (DoS), proteggendo i servizi backend da picchi anomali di traffico.
+
 
 ### 4.2 Routing e Load Balancing
 Kong gestisce il routing basato su Host (es. `producer.nip.io`) e instrada il traffico verso i *Service* Kubernetes sottostanti. Il bilanciamento del carico tra le varie repliche dei pod applicativi avviene automaticamente sfruttando il meccanismo nativo dei Service, garantendo una distribuzione uniforme delle richieste.
@@ -94,33 +100,67 @@ In linea con le best practice, la configurazione è disaccoppiata:
 L'architettura è stata validata rispetto a tre pilastri fondamentali per sistemi cloud-native mission-critical, verificati tramite scenari di test specifici.
 
 ### 6.1 Security & Secrets Management (Defense in Depth)
-La sicurezza è stata implementata seguendo il principio della *Defense in Depth*, proteggendo ogni livello dello stack:
-* **Data in Transit & Auth:** La comunicazione interna tra i microservizi (Producer/Consumer) e il cluster Kafka è protetta da **TLS** (porta 9093) per prevenire *Man-in-the-Middle*. L'accesso al broker non è anonimo ma autenticato via **SASL/SCRAM-SHA-512**, con utenze dedicate (`producer-user`, `consumer-user`) per ogni componente (`KafkaUser`).
-* **Edge Protection (Kong):** Agisce da *Policy Enforcement Point* centralizzato, evitando di disperdere logica di auth nel codice applicativo. L'accesso richiede un header `apikey` valido (gestito via Secret). È stata verificata la mitigazione di attacchi DoS/Flood tramite policy (`KongPlugin`) di **Rate Limiting** (5 req/sec): il traffico in eccesso viene respinto all'edge (`429 Too Many Requests`) senza saturare il backend con traffico malevolo/anomalo.
-* **Gestione dei Segreti:** Nessuna credenziale è hardcodata. Le password di MongoDB e Kafka sono iniettate nei Pod esclusivamente tramite **Kubernetes Secrets**, separandole nettamente dalla configurazione non sensibile gestita tramite **ConfigMaps**.
+
+La sicurezza è stata implementata seguendo il principio della *Defense in Depth*, proteggendo ogni livello dello stack.
+
+#### 6.1.1 Data in Transit & Auth
+
+La comunicazione interna tra i microservizi (Producer/Consumer) e il cluster Kafka è protetta da **TLS** (porta 9093) per prevenire *Man-in-the-Middle*.
+L'accesso al broker non è anonimo ma autenticato via **SASL/SCRAM-SHA-512**, con utenze dedicate (`producer-user`, `consumer-user`) per ogni componente (`KafkaUser`).
+
+#### 6.1.2 Edge Protection (Kong)
+
+Kong agisce da *Policy Enforcement Point* centralizzato, evitando di disperdere logica di auth nel codice applicativo.
+L'accesso richiede un header `apikey` valido (gestito via Secret).
+È stata verificata la mitigazione di attacchi DoS/Flood tramite policy (`KongPlugin`) di **Rate Limiting** (5 req/sec): il traffico in eccesso viene respinto all'edge (`429 Too Many Requests`) senza saturare il backend con traffico malevolo/anomalo.
+
+#### 6.1.3 Gestione dei Segreti
+
+Nessuna credenziale è hardcodata.
+Le password di MongoDB e Kafka sono iniettate nei Pod esclusivamente tramite **Kubernetes Secrets**, mantenendo la separazione dalla configurazione non sensibile gestita tramite **ConfigMaps**.
+
 
 ### 6.2 Resilience, Fault Tolerance & High Availability
-Il sistema è progettato per sopravvivere a guasti parziali senza perdita di dati o interruzione del servizio:
 
-* **Fault Tolerance (disaccoppiamento e buffering):** La natura asincrona di Kafka garantisce che un crash del *Consumer* non impatti il *Producer*. Durante un disservizio del worker, i messaggi si accumulano nei topic Kafka (che agiscono da buffer persistente) e vengono elaborati (*drained*) non appena il Consumer torna online, garantendo zero perdita di dati (*Zero Data Loss*).
-* **Self-Healing & HA (Kubernetes):** I `Deployment` configurati assicurano che il numero desiderato di repliche sia sempre attivo. In caso di crash del processo Python, il Kubelet riavvia automaticamente il container.
+Il sistema è progettato per sopravvivere a guasti parziali senza perdita di dati o interruzione del servizio.
+
+
+#### 6.2.1 Fault Tolerance (Disaccoppiamento e Buffering)
+
+La natura asincrona di Kafka garantisce che un crash del *Consumer* non impatti il *Producer*.
+Durante un disservizio del worker, i messaggi si accumulano nei topic Kafka (che agiscono da buffer persistente) e vengono elaborati (*drained*) non appena il Consumer torna online, garantendo **zero perdita di dati (Zero Data Loss)**.
+
+#### 6.2.2 Self-Healing & High Availability (Kubernetes)
+
+I `Deployment` Kubernetes assicurano che il numero desiderato di repliche sia sempre attivo.
+In caso di crash del processo Python, il **Kubelet** rileva l’errore e riavvia automaticamente il container, garantendo continuità di servizio e alta disponibilità.
 
 ### 6.3 Scalabilità & Load Balancing
 La validazione delle capacità di scaling è stata condotta in due fasi distinte: una verifica manuale per confermare i meccanismi di distribuzione del carico e una verifica automatica per testare l'elasticità del sistema.
 
-1.  **Verifica dei Meccanismi (Scaling Manuale):**
-    Incremento manuale delle repliche dei microservizi per validare il comportamento architetturale:
-    * **Ingress Load Balancing (HTTP Layer):** Scalando il *Producer* a 2 repliche e iniettando un carico di richieste rapide (Burst), l'analisi dei log ha confermato la corretta distribuzione del traffico tra i pod (Round-Robin) implicando quindi il corretto bilanciamento attuato da **Kong Ingress** e dal Service Kubernetes 
-    * **Consumer Parallelism (Stream Layer):** Scalando il *Consumer* a 3 repliche (corrispondenti alle 3 partizioni del topic `sensor-telemetry`), è stato verificato il processamento parallelo dei messaggi. Questo dimostra che il protocollo di *Consumer Group* di Kafka assegna correttamente le partizioni esclusive ai nuovi worker, massimizzando il throughput di lettura.
+#### **6.3.1 Verifica dei Meccanismi (Scaling Manuale)**
 
-2.  **Elasticità Automatica (HPA):**
-    è stato attivato l'**Horizontal Pod Autoscaler (HPA)** configurato su una soglia di CPU del 50%. Sottoponendo il sistema a uno stress test prolungato, l'architettura ha dimostrato:
-    * **Scale Out:** Rilevare la saturazione della CPU e avviare automaticamente nuove repliche (fino al limite configurato di 4) per assorbire il picco.
-    * **Scale Down:** Rilasciare le risorse terminando i Pod in eccesso al termine del carico, riportando il cluster allo stato operativo standard e garantendo l'efficienza dei costi.
+Incremento manuale delle repliche dei microservizi per validare il comportamento dell’architettura.
 
-### 7. Sfide Tecniche e Soluzioni
+**Ingress Load Balancing (HTTP Layer):**
+Scalando il *Producer* a 2 repliche e iniettando un carico di richieste rapide (Burst), l'analisi dei log ha confermato la corretta distribuzione del traffico tra i pod (Round-Robin) implicando quindi il corretto bilanciamento attuato da **Kong Ingress** e dal Service Kubernetes
 
-#### 7.1 Networking e Reachability degli Ingress (Docker Desktop vs Minikube)
+**Consumer Parallelism (Stream Layer):**
+Scalando il *Consumer* a 3 repliche (corrispondenti alle 3 partizioni del topic `sensor-telemetry`), è stato verificato il processamento parallelo dei messaggi. Questo dimostra che il protocollo di *Consumer Group* di Kafka assegna correttamente le partizioni esclusive ai nuovi worker, massimizzando il throughput di lettura.
+
+#### **6.3.2 Elasticità Automatica (HPA)**
+
+È stato attivato l'**Horizontal Pod Autoscaler (HPA)** configurato su una soglia di CPU del 50%. 
+
+**Scale Out:**
+Durante uno stress test prolungato, il sistema ha rilevato la saturazione della CPU e ha avviato automaticamente nuove repliche (fino a un massimo di 4) per assorbire il carico.
+
+**Scale Down:**
+Terminato il picco, l’HPA ha ridotto il numero di Pod rilasciando le risorse eccedenti, riportando il cluster allo stato operativo standard e garantendo efficienza dei costi.
+
+## 7. Sfide Tecniche e Soluzioni
+
+### 7.1 Networking e Reachability degli Ingress (Docker Desktop vs Minikube)
 * **Problema:** Durante le fasi iniziali di test, l'utilizzo di **Docker Desktop** come driver per Kubernetes impediva l'accesso diretto ai servizi esposti tramite Ingress. A causa dell'isolamento di rete imposto dalla virtualizzazione di Docker Desktop, il "tunnel" verso l'IP del cluster non funzionava come previsto, rendendo irraggiungibili gli endpoint `producer` e `metrics`.
 * **Tentativi e Soluzione:** Inizialmente si è tentato di aggirare il problema DNS utilizzando il servizio **nip.io** (es. `producer.192.168.x.x.nip.io`) per mappare dinamicamente i nomi host. Tuttavia, questo non ha risolto il blocco di rete sottostante. La soluzione definitiva è stata migrare l'ambiente su **Minikube con driver nativo** (o Docker driver su Linux), che espone correttamente l'IP del cluster.
 
