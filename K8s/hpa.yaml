@@ -1,4 +1,5 @@
 # --- HPA PRODUCER ---
+# Gestisce lo scaling del servizio di ingestione.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -18,30 +19,43 @@ spec:
         target:
           type: Utilization
           averageUtilization: 50
-  behavior:
-    scaleDown:
-      stabilizationWindowSeconds: 60
-      policies:
-      - type: Percent
-        value: 50
-        periodSeconds: 15
-      - type: Pods
-        value: 1
-        periodSeconds: 15
-      selectPolicy: Max
-    scaleUp:
-      stabilizationWindowSeconds: 0
-      policies:
-      - type: Percent
-        value: 100
-        periodSeconds: 15
-      - type: Pods
-        value: 2
-        periodSeconds: 15
-      selectPolicy: Max
 
+  # --- COMPORTAMENTO DI SCALING ---
+  # Definisce la "velocità" con cui il cluster reagisce.
+  behavior:
+    # POLICY DI SCALE DOWN
+    # Obiettivo: Evitare il "flapping" (sali-scendi continuo) scendendo gradualmente.
+    scaleDown:
+      #Attende 60s in cui la metrica deve restare bassa prima di ridurre le repliche.
+      stabilizationWindowSeconds: 60   
+      # Sceglie la policy che permette il cambiamento maggiore (più veloce) tra le seguenti:
+      selectPolicy: Max  
+      policies:
+      - type: Percent
+        value: 50             # Permette di dimezzare le repliche...
+        periodSeconds: 15     # ...ogni 15 secondi
+      - type: Pods
+        value: 1              # Oppure di togliere 1 pod...
+        periodSeconds: 15     # ...ogni 15 secondi
+    
+    # POLICY DI SCALE UP (Aggiunta risorse)
+    # Obiettivo: Reagire IMMEDIATAMENTE ai picchi di traffico.  
+    scaleUp:
+      # Nessuna attesa: se la CPU sale, aggiungi subito pod.
+      stabilizationWindowSeconds: 0
+      # Usa la policy più aggressiva tra le due
+      selectPolicy: Max
+      policies:
+      - type: Percent
+        value: 100            # Raddoppia le repliche (es. da 2 a 4 in un colpo)...
+        periodSeconds: 15
+      - type: Pods
+        value: 2              # ...oppure aggiunge 2 pod fissi
+        periodSeconds: 15
+      
 ---
 # --- HPA CONSUMER ---
+# Stessa logica: il consumer deve smaltire code Kafka rapidamente.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -63,7 +77,7 @@ spec:
           averageUtilization: 50
   behavior:
     scaleDown:
-      stabilizationWindowSeconds: 60
+      stabilizationWindowSeconds: 60    # Discesa lenta e stabile
       policies:
       - type: Percent
         value: 50
@@ -73,7 +87,7 @@ spec:
         periodSeconds: 15
       selectPolicy: Max
     scaleUp:
-      stabilizationWindowSeconds: 0
+      stabilizationWindowSeconds: 0   # Salita aggressiva per non accumulare lag su Kafka
       policies:
       - type: Percent
         value: 100

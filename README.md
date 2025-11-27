@@ -889,8 +889,14 @@ Questo test simula uno scenario di alto carico per verificare due comportamenti 
     ```
 
 3.  **Monitoraggio Scaling:**
+  
+    Si aggiorna solo quando c'è una modifica nei log, ma mantiene la traccia dei cambiamenti
     ```bash
     kubectl get hpa -n kafka -w
+    ```
+    Più dinamico (si aggiorna ogni 1 secondo):
+    ```bash
+    watch -n 1 kubectl get hpa -n kafka
     ```
 
     > **Expectation:** Il numero di repliche (`REPLICAS`) aumenta automaticamente (es. da 1 a 4) al salire della CPU target.
@@ -898,7 +904,7 @@ Questo test simula uno scenario di alto carico per verificare due comportamenti 
 4. **Elasticità & Scale Down**
 Dopo aver testato i picchi di carico, è fondamentale dimostrare l'**elasticità** inversa del sistema: la capacità di rilasciare risorse quando non sono più necessarie (*scale down*), riportando il cluster allo stato operativo standard; gestito automaticamente da HPA.
    
-5.  **Restore:**
+1.  **Restore:**
 Rimozione della configurazione HPA dal cluster
     ```bash
     kubectl delete -f K8s/hpa.yaml
