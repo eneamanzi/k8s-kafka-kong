@@ -1,3 +1,6 @@
+# --- KRAFT CONTROLLER NODE POOL ---
+# Definisce il pool di nodi dedicati al ruolo di "Controller" (gestione metadati).
+# Sostituisce ZooKeeper nell'architettura moderna di Kafka (KRaft mode).
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaNodePool
 metadata:
@@ -6,7 +9,9 @@ metadata:
   labels:
     strimzi.io/cluster: iot-sensor-cluster
 spec:
-  replicas: 2 #per HA Assicura che i metadati del cluster (gestiti da Kraft) siano disponibili anche se 1 controller su 3 fallisce.
+  # High Availability: Avere 2+ controller assicura che il quorum (raft) sopravviva a un guasto.
+  # Nota: In produzione ideale dispari (es. 3) per evitare split-brain, ma 2 ok per lab.
+  replicas: 2 
   roles:
     - controller
   storage:
@@ -18,6 +23,8 @@ spec:
         kraftMetadata: shared
         deleteClaim: false
 ---
+# --- BROKER NODE POOL ---
+# Definisce i nodi "Data Plane" che gestiscono i messaggi (Topic, Partizioni).
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaNodePool
 metadata:
@@ -26,18 +33,21 @@ metadata:
   labels:
     strimzi.io/cluster: iot-sensor-cluster
 spec:
-  replicas: 2 #per HA Consente ai client di connettersi ad altri broker se uno fallisce.
+  #Scalabilità: Qui definiamo quanti broker gestiscono il traffico dati.
+  replicas: 2 
   roles:
     - broker
   storage:
     type: jbod
     volumes:
       - id: 0
-        type: persistent-claim
+        type: persistent-claim  # Storage persistente (PVC) per non perdere i messaggi al riavvio
         size: 5Gi
         kraftMetadata: shared
         deleteClaim: false
 ---
+# --- KAFKA CLUSTER DEFINITION ---
+# Risorsa principale che orchestra i pool definiti sopra.
 apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
 metadata:
@@ -47,6 +57,8 @@ spec:
   kafka:
     version: 4.1.0
     metadataVersion: 4.1-IV1
+
+    # Configurazione Listener (Porte di ascolto)
     listeners:
       - name: plain
         port: 9092
@@ -58,17 +70,30 @@ spec:
         tls: true
         authentication:
           type: scram-sha-512
+
+    # Configurazione Server Kafka (server.properties)
     config:
-    #Garantisce che 3 copie di ogni partizione esistano e che almeno 2 siano sincronizzate. Se 1 broker fallisce, la scrittura può continuare verso le 2 rimanenti senza perdere dati.
-      # Aumenta il fattore di replicazione a 3
+      # --- REPLICAZIONE (Data Redundancy) ---
+      # Impostiamo il fattore a 2 perché abbiamo definito 2 repliche nel NodePool 'broker'.
+      # Ogni messaggio verrà salvato su entrambi i nodi per ridondanza.
       offsets.topic.replication.factor: 2
       transaction.state.log.replication.factor: 2
       default.replication.factor: 2 # Fattore di replicazione per i nuovi topic
       
-      # Minimo di In-Sync Replicas (HA/Durabilità)
-      # Il valore di 2 significa che 1 replica può fallire e il sistema resta disponibile (3-1=2)
+      # --- CONSISTENZA vs DISPONIBILITÀ (min.isr) ---
+      # Definisce quante repliche devono confermare la scrittura affinché sia considerata valida.
+      
+      # CONFIGURAZIONE TEST (Minikube/Risorse Limitate):
+      # Impostiamo a 1. In questo ambiente con risorse limitate (CPU/RAM), diamo priorità 
+      # alla disponibilità: se un broker va in crash o è lento, il cluster deve continuare a funzionare.
+      
+      # CONFIGURAZIONE PRODUZIONE (Best Practice):
+      # In un ambiente reale, questo valore andrebbe impostato a 2 (con Replication Factor >= 3).
+      # Questo garantirebbe che nessuna scrittura venga persa anche in caso di fallimento di un nodo,offrendo tolleranza ai guasti reale (N-1) senza compromettere la consistenza.
       transaction.state.log.min.isr: 1 
       min.insync.replicas: 1
+  
+  # Entity Operator: Gestisce Topic e Utenti come risorse K8s (GitOps)
   entityOperator:
     topicOperator: {}
     userOperator: {}

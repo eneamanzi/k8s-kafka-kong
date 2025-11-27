@@ -4,17 +4,20 @@ metadata:
   name: producer-ingress
   namespace: kafka
   annotations:
-    konghq.com/plugins: key-auth  # <--- CAMBIATO: da jwt-auth a key-auth
+    # --- PLUGIN BINDING ---
+    # Collega questo Ingress al plugin 'key-auth' configurato in 'K8s/auth-apikey/apikey-plugin-kafka.yaml'.
+    # Ogni richiesta che passa di qui dovrà avere un header 'apikey' valido.
+    konghq.com/plugins: key-auth
 spec:
-  ingressClassName: kong  
+  ingressClassName: kong                # Delega la gestione a Kong Ingress Controller
   rules:
   - host: producer.192.168.58.2.nip.io  # NOTA: Assicurati che l'IP sia quello del tuo minikube ip
     http:
       paths:
-        - path: /event
+        - path: /event                  # Instrada tutte le richieste che iniziano per /event
           pathType: Prefix
           backend:
             service:
-              name: producer-service
+              name: producer-service    # Forward verso il Service definito nel deployment
               port:
                 number: 5000

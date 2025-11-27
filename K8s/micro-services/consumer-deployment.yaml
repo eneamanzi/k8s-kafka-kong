@@ -17,7 +17,11 @@ spec:
       - name: consumer
         image: consumer:latest
         imagePullPolicy: IfNotPresent
+
+        # --- ENV VARS ---
+        # Include sia la config di Kafka (Source) che di MongoDB (Sink)
         env:
+        # 1. KAFKA CONFIG (Lettura eventi)
         - name: KAFKA_BOOTSTRAP
           value: "iot-sensor-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093"
         - name: SASL_USERNAME
@@ -29,7 +33,9 @@ spec:
               key: password
         - name: KAFKA_CA
           value: "/etc/ssl/certs/kafka/ca.crt"
-        # MongoDB Config da ConfigMap
+        
+        # 2. MONGODB CONFIG (Scrittura dati)
+        # Parametri non sensibili dalla ConfigMap 'mongodb-config'
         - name: MONGO_HOST
           valueFrom:
             configMapKeyRef:
@@ -50,7 +56,8 @@ spec:
             configMapKeyRef:
               name: mongodb-config
               key: MONGO_AUTH_SOURCE
-        # MongoDB Credentials da Secret
+        
+        # Credenziali sensibili dal Secret 'mongo-creds'
         - name: MONGO_USER
           valueFrom:
             secretKeyRef:
@@ -61,10 +68,13 @@ spec:
             secretKeyRef:
               name: mongo-creds
               key: MONGO_PASSWORD
+        
         volumeMounts:
         - name: kafka-ca
           mountPath: /etc/ssl/certs/kafka
           readOnly: true
+        
+        # Risorse dimensionate per un worker di processing
         resources:
           requests:
             cpu: "100m"

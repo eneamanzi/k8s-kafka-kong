@@ -4,6 +4,8 @@ metadata:
   name: producer
   namespace: kafka
 spec:
+  # Scalabilità: Iniziamo con 1 replica. Questo valore verrà modificato dinamicamente 
+  # dall'Horizontal Pod Autoscaler (HPA) in base al carico CPU (se abilitato).
   replicas: 1
   selector:
     matchLabels:
@@ -16,10 +18,15 @@ spec:
       containers:
       - name: producer
         image: producer:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: IfNotPresent   # Usa l'immagine locale (buildata in Minikube) se presente
+
+        # --- CONFIGURAZIONE AMBIENTE ---
         env:
+        # Endpoint del broker Kafka (Service K8s interno + porta TLS 9093)
         - name: KAFKA_BOOTSTRAP
           value: "iot-sensor-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093"
+        
+        # Credenziali SASL (Plain text per user, Secret reference per password)
         - name: SASL_USERNAME
           value: "producer-user"
         - name: SASL_PASSWORD
@@ -27,14 +34,24 @@ spec:
             secretKeyRef:
               name: producer-user
               key: password
+        
+        # Credenziali SASL (Plain text per user, Secret reference per password)
         - name: KAFKA_CA
           value: "/etc/ssl/certs/kafka/ca.crt"
+
         ports:
         - containerPort: 5000
+
+        # --- MONTAGGIO CERTIFICATI ---
+        # Montiamo il secret 'kafka-ca-cert' come file nel filesystem del container.
+        # Necessario per validare la connessione TLS verso Kafka.
         volumeMounts:
         - name: kafka-ca
           mountPath: /etc/ssl/certs/kafka
           readOnly: true
+        
+        # --- RESOURCE QUOTAS ---
+        # Fondamentali per il funzionamento dell'autoscaler (HPA) e la stabilità del nodo.
         resources:
           requests:
             cpu: "100m"
@@ -42,11 +59,14 @@ spec:
           limits:
             cpu: "500m"
             memory: "256Mi"
+    
       volumes:
       - name: kafka-ca
         secret:
-          secretName: kafka-ca-cert
+          secretName: kafka-ca-cert # Secret creato manualmente contenente la CA del cluster
 ---
+# --- SERVICE INTERNO ---
+# Astrae l'accesso ai Pod del Producer. Kong Ingress punterà a questo servizio.
 apiVersion: v1
 kind: Service
 metadata:
@@ -57,6 +77,6 @@ spec:
     app: producer
   ports:
   - protocol: TCP
-    port: 5000
-    targetPort: 5000
-  type: ClusterIP
+    port: 5000          # Porta del servizio (interna al cluster)
+    targetPort: 5000    # Porta del container
+  type: ClusterIP       # Non esposto direttamente all'esterno (ci pensa l'Ingress)

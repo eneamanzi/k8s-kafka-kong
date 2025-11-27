@@ -2,9 +2,12 @@ apiVersion: configuration.konghq.com/v1
 kind: KongPlugin
 metadata:
   name: key-auth
-  namespace: metrics
+  namespace: metrics    # Valido per il namespace delle metriche
 plugin: key-auth
 config:
+  # Definisce il nome dell'header HTTP dove Kong cercherà la chiave
   key_names:
     - apikey
+  # Security Best Practice: Rimuove l'header 'apikey' dalla richiesta prima di inoltrarla
+  # al microservizio backend (Producer), evitando che le chiavi finiscano nei log applicativi.
   hide_credentials: true

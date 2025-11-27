@@ -2,8 +2,13 @@ apiVersion: configuration.konghq.com/v1
 kind: KongConsumer
 metadata:
   name: iot-devices
+  # Il Consumer è un'entità globale per Kong, ma in K8s deve risiedere in un namespace.
+  # Lo mettiamo in 'kafka' (dove risiede l'ingresso principale).
   namespace: kafka
   annotations:
     kubernetes.io/ingress.class: kong
-    konghq.com/credentials: iot-devices-apikey  # <-- AGGIUNGI QUESTA RIGA
+    # BINDING CREDENZIALI:
+    # Collega esplicitamente questo consumatore al Secret 'iot-devices-apikey' definito in apikey-credential.yaml.
+    # Senza questa riga, Kong non saprebbe che la chiave nel secret appartiene a questo utente.
+    konghq.com/credentials: iot-devices-apikey 
 username: iot-devices

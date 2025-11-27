@@ -1,14 +1,19 @@
+# --- UTENTE PRODUCER ---
+# Strimzi Operator genererà un Secret k8s 'producer-user' contenente la password SASL.
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:
   name: producer-user
   namespace: kafka
   labels:
+    # Label necessaria affinché l'Operator sappia a quale cluster associare l'utente
     strimzi.io/cluster: iot-sensor-cluster
 spec:
   authentication:
+    # Meccanismo SCRAM-SHA-512: Challenge-Response sicura (evita password in chiaro).
     type: scram-sha-512
 ---
+# --- UTENTE CONSUMER ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:

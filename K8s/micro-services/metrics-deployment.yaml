@@ -2,9 +2,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: metrics-service
+  # Namespace dedicato 'metrics': Isola logicamente questo servizio dal resto (kafka, kong)
   namespace: metrics
 spec:
-  replicas: 1
+  replicas: 1   # Numero iniziale di pod (scalabile via HPA)
   selector:
     matchLabels:
       app: metrics-service
@@ -17,8 +18,12 @@ spec:
       - name: metrics-service
         image: metrics-service:latest
         imagePullPolicy: IfNotPresent
+
+        # --- CONFIGURAZIONE AMBIENTE ---
+        # Il servizio ha bisogno di sapere dove trovare MongoDB e come autenticarsi.
+        # Notare che usiamo ConfigMap e Secret che esistono nel namespace 'metrics'.
         env:
-        # MongoDB Config da ConfigMap
+        # 1. Parametri non sensibili (Host, Porta, DB Name) da ConfigMap
         - name: MONGO_HOST
           valueFrom:
             configMapKeyRef:
@@ -39,7 +44,9 @@ spec:
             configMapKeyRef:
               name: mongodb-config
               key: MONGO_AUTH_SOURCE
-        # MongoDB Credentials da Secret
+        
+        # 2. Credenziali sensibili (Utente e Password)
+        # Prelevate in modo sicuro dai Secret Kubernetes, mai scritte in chiaro qui.
         - name: MONGO_USER
           valueFrom:
             secretKeyRef:
@@ -50,8 +57,12 @@ spec:
             secretKeyRef:
               name: mongo-creds
               key: MONGO_PASSWORD
+        
+        # Esposizione porta applicativa (Flask gira sulla 5001 nel container)
         ports:
         - containerPort: 5001
+        
+        # Resource Limits: Essenziali per evitare che un bug consumi tutta la RAM del nodo
         resources:
           requests:
             cpu: "100m"
@@ -60,6 +71,8 @@ spec:
             cpu: "500m"
             memory: "256Mi"
 ---
+# --- SERVICE INTERNO ---
+# L'Ingress userà questo servizio come backend.
 apiVersion: v1
 kind: Service
 metadata:
@@ -67,9 +80,10 @@ metadata:
   namespace: metrics
 spec:
   selector:
+    # Instrada il traffico verso tutti i pod con label 'app: metrics-service'
     app: metrics-service
   ports:
     - protocol: TCP
-      port: 5001
-      targetPort: 5001
+      port: 5001          # Porta esposta dal Service
+      targetPort: 5001    # Porta su cui ascolta il Container
   type: ClusterIP

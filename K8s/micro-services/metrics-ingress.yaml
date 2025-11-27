@@ -4,17 +4,21 @@ metadata:
   name: metrics-ingress
   namespace: metrics
   annotations:
-    konghq.com/plugins: key-auth  # <--- CAMBIATO: da jwt-auth a key-auth
+    # --- SICUREZZA ---
+    # Applica il plugin 'key-auth' a questo Ingress.
+    # Significa che chiunque provi a leggere le metriche deve fornire un'API Key valida.
+    # Protegge i dati sensibili aziendali da accessi pubblici non autorizzati.
+    konghq.com/plugins: key-auth  
 spec:
-  ingressClassName: kong
+  ingressClassName: kong                # Usa Kong come Gateway
   rules:
     - host: metrics.192.168.58.2.nip.io # NOTA: Verifica IP
       http:
         paths:
-          - path: /metrics
+          - path: /metrics              # Intercetta tutte le chiamate che iniziano con /metrics
             pathType: Prefix
             backend:
               service:
-                name: metrics-service
+                name: metrics-service   # Inoltra al Service interno definito nel metrics-deployment.yaml
                 port:
                   number: 5001
