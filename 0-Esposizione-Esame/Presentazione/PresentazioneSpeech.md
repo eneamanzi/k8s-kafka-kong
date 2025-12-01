@@ -10,14 +10,15 @@ Lo scenario simula una rete di sensori eterogenei che generano flussi continui d
 ---
 
 ## SLIDE 2 - Obiettivi Architetturali & Requisiti (1:30 min)
-"Il contesto è quello di una rete IoT industriale che richiede una QoS differenziata. Abbiamo due macro-flussi: i **dati operativi ad alta frequenza** (telemetria ambientale, eventi di boot, aggiornamenti firmware), che richiedono efficienza e compressione, e gli **eventi critici** (allarmi), sporadici ma che esigono Zero Data Loss (garanzia di consegna)
+Il contesto è una rete IoT industriale che richiede QoS differenziata.
+Abbiamo due macro-flussi: i **dati operativi ad alta frequenza** (telemetria ambientale, eventi di boot, aggiornamenti firmware), che richiedono efficienza e compressione, e gli **eventi critici** (allarmi), sporadici ma che esigono Zero Data Loss (garanzia di consegna)
 
 Per soddisfare i requisiti del Project 1 (Kafka), ho progettato un cluster resiliente in modalità KRaft, con topic differenziati per garantire sia l'alta disponibilità che la durabilità dei dati critici. 
 Per il Project 3 (Kong), l'obiettivo è stato il Gateway Offloading: delegare all'infrastruttura la sicurezza e il controllo del traffico tramite pattern dichiarativi su Kubernetes, alleggerendo così i microservizi (sposta la complessità trasversale dall'applicazione all'infrastruttura)."
 
 ---
 
-## SLIDE 3 - Architettura e Flusso Dati (1:45 min)
+## SLIDE 3 - Architettura e Flusso Dati (2:00 min)
 
 "L'architettura implementa un pattern **puramente event-driven** con disaccoppiamento asincrono tramite Kafka.
 
@@ -115,7 +116,7 @@ Notate che il Consumer è scalato a 3 repliche per allinearsi alle 3 partizioni 
 
 "Tre sfide principali risolte durante lo sviluppo.
 
-**Networking**: La prima sfida è stata sul Networking e Reachability. L'isolamento di rete di alcuni driver container impediva il routing corretto verso gli Ingress Controller. La soluzione è stata adottare Minikube con driver nativo, che permette di esporre l'IP del cluster direttamente all'host, rendendo accessibili i domini nip.io definiti nelle regole di Ingress.
+**Networking**: L'isolamento di rete del driver Docker Desktop impediva impediva il routing corretto verso gli Ingress Controller. La soluzione è stata adottare Minikube con driver nativo, che permette di esporre l'IP del cluster direttamente all'host, rendendo accessibili i domini nip.io definiti nelle regole di Ingress.
 
 **Garanzia di Consegna e Idempotenza**: La semantica at-least-once di Kafka rischia duplicazioni se il Consumer crasha dopo la scrittura su MongoDB ma prima del commit dell'offset. Ho implementato UUID univoci nel Producer — l'architettura è **predisposta** per upsert su MongoDB usando l'`event_id` come chiave univoca, anche se attualmente accetto la duplicazione per massimizzare il throughput.
 
