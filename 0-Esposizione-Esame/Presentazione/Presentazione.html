@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Esame CCT - Architettura Microservizi Event-Driven</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+/* --- VARIABILI GLOBALI --- */
+:root {
+    --bg-color: #020617;
+    --slide-bg: #0f172a;
+    --accent: #38bdf8;       /* Blue */
+    --accent-secondary: #f472b6; /* Pink */
+    --text-main: #e2e8f0;
+    --text-muted: #94a3b8;
+    --color-green: #4ade80;  /* Mongo/Success */
+    --color-pink: #f472b6;   /* Kafka */
+    --color-red: #f87171;    /* Alerts */
+    --color-orange: #f97316; /* Challenges */
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* --- LAYOUT GENERALE E SCROLL --- */
+body {
+    background-color: var(--bg-color);
+    color: var(--text-main);
+    font-family: 'Inter', sans-serif;
+    padding: 40px; 
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 40px; 
+    margin: 0;
+    overflow-y: auto; 
+}
+
+/* --- WRAPPER E SLIDE BASE --- */
+.slides-wrapper {
+    position: relative;
+    width: 1280px; 
+    height: auto; 
+    box-shadow: 0 0 50px rgba(0,0,0,0.5);
+}
+
+.slide {
+    width: 1280px; 
+    height: 720px; 
+    background: var(--slide-bg);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    position: relative; 
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 60px;
+    opacity: 1; 
+    pointer-events: auto;
+    z-index: 1;
+    margin-bottom: 40px; 
+}
+
+/* Background Effects (Gradient Blobs) */
+.slide::before {
+    content: ''; position: absolute; top: -200px; right: -200px; width: 600px; height: 600px;
+    background: radial-gradient(circle, rgba(56, 189, 248, 0.08) 0%, transparent 60%);
+    border-radius: 50%; pointer-events: none; z-index: 0;
+}
+.slide::after {
+    content: ''; position: absolute; bottom: -200px; left: -200px; width: 600px; height: 600px;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.08) 0%, transparent 60%);
+    border-radius: 50%; pointer-events: none; z-index: 0;
+}
+
+/* --- NUMERAZIONE PAGINE --- */
+.slide-number {
+    position: absolute;
+    bottom: 30px;
+    right: 40px;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+    z-index: 10;
+    background: rgba(15, 23, 42, 0.8);
+    padding: 5px 10px;
+    border-radius: 4px;
+}
+
+/* --- TIPOGRAFIA GENERALE --- */
+h1 { font-size: 58px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; margin-bottom: 20px; color: white; position: relative; z-index: 1; }
+h2 { font-size: 42px; font-weight: 700; color: #f8fafc; margin-bottom: 30px; display: flex; align-items: center; gap: 15px; position: relative; z-index: 1; }
+h2::before { content: ''; width: 8px; height: 42px; background: var(--accent); border-radius: 4px; display: inline-block; }
+h3 { font-size: 24px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; position: relative; z-index: 1; color: var(--accent); } 
+p, li { font-size: 20px; color: #cbd5e1; line-height: 1.5; margin-bottom: 10px; position: relative; z-index: 1; }
+
+/* --- CLASSI DI REFACTORING (Stili Specifici H3/H4) --- */
+.h3-secondary { color: var(--color-pink); } 
+.h3-tertiary { color: var(--color-green); } 
+
+.card p, .card li { font-size: 18px; } 
+.title-challenge { color: var(--color-orange); }
+
+.code-block { 
+    font-family: 'JetBrains Mono', monospace; 
+    background: #1e293b; 
+    padding: 15px; 
+    border-radius: 8px; 
+    border-left: 4px solid var(--accent-secondary); 
+    color: #e2e8f0; 
+    font-size: 14px;
+    margin-top: 10px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    white-space: pre;
+    overflow-x: auto;
+    position: relative; z-index: 1;
+}
+.keyword { color: #c084fc; } 
+.string { color: #86efac; } 
+.value { color: #f472b6; } 
+
+/* Custom styles for Kafka topic/MongoDB details */
+.detail-box {
+    background: rgba(30, 41, 59, 0.5);
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    position: relative; z-index: 1;
+}
+.detail-box h4 {
+    font-size: 22px;
+    color: var(--accent);
+    margin-bottom: 10px;
+    border-bottom: 1px dashed rgba(255,255,255,0.1);
+    padding-bottom: 5px;
+}
+.detail-box.critical h4 { color: var(--color-red); }
+.detail-box.storage h4 { color: var(--color-green); }
+
+
+/* --- LAYOUTS E CARD --- */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; height: 100%; align-items: start; position: relative; z-index: 1; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; height: 100%; position: relative; z-index: 1; }
+
+.card {
+    background: rgba(30, 41, 59, 0.5);
+    border: 1px solid rgba(255,255,255,0.05);
+    padding: 25px;
+    border-radius: 12px;
+    height: 100%;
+}
+.card h4 { font-size: 26px; color: #fff; margin-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; }
+
+/* Architecture Diagram */
+.arch-diagram {
+    display: flex; align-items: center; justify-content: space-between;
+    background: rgba(15, 23, 42, 0.8); padding: 30px 20px;
+    border-radius: 12px; margin-top: 20px;
+    position: relative; z-index: 1;
+}
+.arch-node {
+    background: #1e293b; border: 2px solid #334155; padding: 15px;
+    border-radius: 8px; text-align: center; width: 130px; z-index: 2;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+}
+.arch-node i { font-size: 28px; margin-bottom: 8px; display: block; }
+.arch-node span { font-weight: 700; font-size: 13px; display: block; color: #f1f5f9; }
+.arch-node.kong { border-color: var(--accent); }
+.arch-node.kafka { border-color: var(--accent-secondary); }
+.arch-node.mongo { border-color: var(--color-green); }
+.arch-arrow {
+    flex-grow: 1; height: 2px; background: #475569; position: relative; margin: 0 5px;
+}
+.arch-arrow::after { content: '►'; position: absolute; right: -5px; top: -6px; color: #475569; font-size: 10px; }
+
+/* --- NFP List (OTTIMIZZATO PER SPAZIO) --- */
+.nfp-list { 
+    display: grid; 
+    grid-template-columns: repeat(2, 1fr); 
+    gap: 20px; /* Ridotto da 30px */
+    margin-top: 10px; /* Ridotto */
+}
+.nfp-item { 
+    background: rgba(30, 41, 59, 0.4); 
+    padding: 18px; /* Ridotto da 20px */
+    border-radius: 8px; 
+    border-left: 4px solid var(--accent); 
+    position: relative; z-index: 1;
+}
+.nfp-item strong { 
+    color: #f8fafc; 
+    font-size: 19px; /* Ridotto da 22px */ 
+    display: block; 
+    margin-bottom: 8px; 
+}
+/* Stili specifici per le liste dentro NFP per risparmiare spazio */
+.nfp-item ul { margin: 0; padding-left: 20px; }
+.nfp-item li { 
+    font-size: 15px; /* Ridotto da 20px per far stare tutto */ 
+    line-height: 1.4; 
+    margin-bottom: 5px; 
+}
+
+/* Challenge Cards */
+.challenge-card {
+    background: #1e293b;
+    border-left: 4px solid #f97316; 
+    padding: 20px;
+    border-radius: 8px;
+    height: 100%;
+}
+.challenge-card h4 { font-size: 20px; color: #f97316; margin-bottom: 5px; border-bottom: none; padding-bottom: 0; }
+.challenge-card .solution { color: #f8fafc; font-weight: 600; margin-top: 8px; }
+.challenge-card .problem { font-size: 16px; color: var(--text-muted); }
+
+/* UI (Hidden in Print) */
+.export-btn { display: none; }
+
+/* --- PRINT/PDF EXPORT STYLES --- */
+@media print {
+    @page { size: 1280px 720px; margin: 0; } 
+    
+    body { 
+        background-color: white; 
+        width: 1280px; height: auto;
+        display: block; margin: 0; padding: 0; 
+        overflow: visible;
+    }
+    
+    .slides-wrapper { 
+        width: 1280px !important; 
+        height: auto !important; 
+        box-shadow: none; 
+        position: relative !important;
+        margin: 0 !important;
+    }
+    
+    .slide { 
+        position: relative !important; 
+        page-break-after: always;
+        width: 1280px; height: 720px;
+        background-color: var(--slide-bg) !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+        display: flex !important;
+        padding: 60px;
+        margin-bottom: 0;
+    }
+    
+    .slide:last-child { page-break-after: avoid; }
+}
+    </style>
+</head>
+<body>
+
+<div class="slides-wrapper">
+
+    <!-- SLIDE 1: INTRO -->
+    <div class="slide">
+        <div style="display: flex; flex-direction: column; justify-content: center; height: 100%; text-align: center;">
+            <p style="letter-spacing: 4px; color: #38bdf8; font-size: 16px; font-weight: 700; text-transform: uppercase; margin-bottom: 20px;">Corso: Cloud Computing Technologies</p>
+            <h1>Architettura Microservizi<br>Event-Driven su Kubernetes</h1>
+            <div style="width: 100px; height: 4px; background: #38bdf8; margin: 40px auto; border-radius: 2px;"></div>
+            <p style="font-size: 24px; color: #94a3b8; max-width: 800px; margin: 0 auto;">Implementazione di una pipeline IoT scalabile per la gestione differenziata di flussi ad alta frequenza e criticità.</p>
+            
+            <div style="margin-top: 60px; text-align: center; color: #cbd5e1; font-family: 'Inter', sans-serif; font-size: 20px;">
+                <p style="margin-bottom: 5px;"><strong>Studente:</strong> Enea Manzi</p>
+                <p style="margin-bottom: 5px;"><strong>Corso:</strong> Cloud Computing Technologies</p>
+                <p><strong>Anno Accademico:</strong> 2025/2026</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- SLIDE 2: OBIETTIVI & CONTESTO -->
+    <div class="slide">
+        <h2>Obiettivi Architetturali & Requisiti</h2>
+        <div style="margin-bottom: 30px; background: rgba(56, 189, 248, 0.1); padding: 20px; border-radius: 8px;">
+            <p style="margin: 0; color: #e2e8f0; font-size: 20px;">
+                <i class="fa-solid fa-industry" style="color: #38bdf8; margin-right: 10px;"></i>
+                <strong>Scenario:</strong> Monitoraggio real-time di una rete eterogenea di sensori IoT industriali.
+            </p>
+        </div>
+        
+        <div class="two-col">
+            <div class="card">
+                <h4 class="h3-secondary">Project 1: Apache Kafka</h4>
+                <p>Design di un sistema di messaging robusto per eventi critici.</p>
+                <ul style="list-style: none; padding: 0;">
+                    <li><i class="fa-solid fa-check" style="color:var(--color-pink); margin-right:8px;"></i><strong>Fault Tolerance & HA:</strong> Durabilità e sopravvivenza ai guasti.</li>
+                    <li><i class="fa-solid fa-check" style="color:var(--color-pink); margin-right:8px;"></i><strong>Advanced Security:</strong> TLS/SASL per comunicazione cifrata.</li>
+                    <li><i class="fa-solid fa-check" style="color:var(--color-pink); margin-right:8px;"></i><strong>Topic Differenziati:</strong> Separazione QoS (Alta Frequenza vs Criticità).</li>
+                </ul>
+            </div>
+            <div class="card">
+                <h4 style="color: var(--accent);">Project 3: Kong API Gateway</h4>
+                <p>Implementazione delle NFP (Non-Functional Properties) all'edge.</p>
+                <ul style="list-style: none; padding: 0;">
+                    <li><i class="fa-solid fa-check" style="color:var(--accent); margin-right:8px;"></i><strong>Gateway Offloading:</strong> Autenticazione (API Key) e Load Balancing.</li>
+                    <li><i class="fa-solid fa-check" style="color:var(--accent); margin-right:8px;"></i><strong>Traffic Control:</strong> Protezione DoS tramite Rate Limiting.</li>
+                    <li><i class="fa-solid fa-check" style="color:var(--accent); margin-right:8px;"></i><strong>Configurazione:</strong> Declarative via Kubernetes CRD.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- SLIDE 3: ARCHITECTURE -->
+    <div class="slide">
+        <h2>Architettura e Flusso Dati (Event-Driven) </h2>
+        <p style="text-align: center; margin-bottom: 40px; color: #94a3b8;">La pipeline è segmentata in namespace logici (`kong`, `kafka`, `metrics`) per garantire la Separation of Concerns.</p>
+        <div class="arch-diagram">
+            <div class="arch-node">
+                <i class="fa-solid fa-laptop-code" style="color: #cbd5e1;"></i>
+                <span>Sensors</span>
+            </div>
+            <div class="arch-arrow"></div>
+            <div class="arch-node kong">
+                <i class="fa-solid fa-shield-halved" style="color: var(--accent);"></i>
+                <span>Kong GW</span>
+            </div>
+            <div class="arch-arrow"></div>
+            <div class="arch-node">
+                <i class="fa-brands fa-python" style="color: #fbbf24;"></i>
+                <span>Producer</span>
+            </div>
+            <div class="arch-arrow"></div>
+            <div class="arch-node kafka">
+                <i class="fa-solid fa-server" style="color: var(--accent-secondary);"></i>
+                <span>Kafka</span>
+            </div>
+            <div class="arch-arrow"></div>
+            <div class="arch-node">
+                <i class="fa-solid fa-microchip" style="color: #fbbf24;"></i>
+                <span>Consumer</span>
+            </div>
+            <div class="arch-arrow"></div>
+            <div class="arch-node mongo">
+                <i class="fa-solid fa-database" style="color: var(--color-green);"></i>
+                <span>MongoDB</span>
+            </div>
+        </div>
+        
+        <div style="margin-top: 40px; font-size: 18px;">
+            <h3 style="color: white; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 5px; margin-bottom: 10px;">Flusso Dati Asincrono</h3>
+            <ul style="list-style: disc; padding-left: 20px;">
+                <li><strong>Kong:</strong> Reverse Proxy che valida l'identità del sensore (API Key).</li>
+                <li><strong>Producer:</strong> Microservizio stateless che aggiunge metadati (UUID, timestamp) e instrada i messaggi su Kafka.</li>
+                <li><strong>Kafka:</strong> Broker con durabilità su disco, routing intelligente (Telemetry vs Alerts) e buffering.</li>
+                <li><strong>Consumer:</strong> Normalizza i dati e li storicizza su MongoDB Time Series.</li>
+                <li><strong>Metrics Service:</strong> Accede a MongoDB per calcolare aggregazioni on-demand (es. medie temperatura).</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- SLIDE 4: KAFKA (Correzione Layout) -->
+    <div class="slide">
+        <h2>Apache Kafka: Topic Strategy & Durability</h2>
+        
+        <!-- SEZIONE KRaft (NON in colonna) -->
+        <h3 style="margin-bottom: 15px;"><i class="fa-solid fa-microchip"></i> KRaft Mode (Senza ZooKeeper)</h3>
+        <p style="margin-bottom: 30px;">Architettura semplificata che rimuove la dipendenza da ZooKeeper. Gestione dei metadati interna tramite quorum, riducendo il footprint di risorse (CPU/RAM) e semplificando l'operatività.</p>
+
+        <!-- SEZIONE TOPIC (Due colonne) -->
+        <div class="two-col" style="height: 280px; margin-bottom: 30px;">
+            
+            <!-- Colonna 1: Topic Telemetry -->
+            <div>
+                <div class="detail-box">
+                    <h4 class="detail-box-title">Topic: <code>sensor-telemetry</code> (Alta Frequenza)</h4>
+                    <p>Flussi massivi (Telemetria, Boot, Update) che richiedono efficienza.</p>
+                    <div class="code-block" style="border-left-color: var(--color-pink);">
+<span class="keyword">partitions:</span> <span class="value">3</span>       <span style="color: #64748b;"># Max parallelismo di lettura (3 Consumer)</span>
+<span class="keyword">replicas:</span> <span class="value">2</span>
+<span class="keyword">config:</span>
+  <span class="keyword">compression.type:</span> <span class="string">lz4</span>
+  <span class="keyword">retention.ms:</span> <span class="value">604800000</span>   <span style="color: #64748b;"># 7 Giorni (dati "caldi")</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Colonna 2: Topic Alerts -->
+            <div>
+                <div class="detail-box critical">
+                    <h4 class="detail-box-title">Topic: <code>sensor-alerts</code> (Critico / Durabilità)</h4>
+                    <p style="font-size: 18px; color: var(--color-red);">Eventi sporadici (Allarmi) che impongono massima garanzia di consegna.</p>
+                    <div class="code-block" style="border-left-color: var(--color-red);">
+<span class="keyword">partitions:</span> <span class="value">2</span>
+<span class="keyword">replicas:</span> <span class="value">2</span>
+<span class="keyword">config:</span>
+  <span class="keyword">min.insync.replicas:</span> <span class="value">2</span>    <span style="color: #64748b;"># Zero Data Loss garantito</span>
+  <span class="keyword">retention.ms:</span> <span class="value">2592000000</span>  <span style="color: #64748b;"># 30 Giorni (Audit)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SEZIONE COMPRESSIONE (NON in colonna) -->
+        <h3 class="h3-secondary"><i class="fa-solid fa-gauge-high"></i> Compressione Ibrida</h3>
+        <p><strong>Transport Layer (Kafka):</strong> Compressione <strong>LZ4</strong> (alto throughput / bassa latenza).</p>
+        <p><strong>Storage Layer (MongoDB):</strong> Compressione <strong>Zstd</strong> nativa per risparmio disco a lungo termine.</p>
+    </div>
+
+    <!-- SLIDE 5: KONG -->
+    <div class="slide">
+        <h2>Kong Gateway: Edge Computing & Security Offloading</h2>
+        <div class="two-col">
+            <div>
+                <h3><i class="fa-solid fa-shield-halved"></i> Key-Auth & Security</h3>
+                <p>Implementazione del pattern <strong>Gateway Offloading</strong>. Sposta la logica di autenticazione all'infrastruttura.</p>
+                <ul style="margin-top: 10px;">
+                    <li>Verifica l'header `apikey` tramite plugin `key-auth`.</li>
+                    <li><strong>Revoca immediata:</strong> basta aggiornare il K8s Secret.</li>
+                    <li>L'header viene rimosso dal payload (<code>hide_credentials</code>).</li>
+                </ul>
+
+                <h3 class="h3-secondary" style="margin-top: 20px;"><i class="fa-solid fa-stopwatch"></i> Rate Limiting & Protection</h3>
+                <p>Policy di <strong>Rate Limiting</strong> dinamica per mitigare attacchi Denial of Service (DoS).</p>
+                <ul>
+                    <li>Configurazione: <code>5 req/sec</code> per client (risposta: <code>429 Too Many Requests</code>).</li>
+                </ul>
+
+                <h3 class="h3-tertiary" style="margin-top: 20px;"><i class="fa-solid fa-sliders"></i> Load Balancing (Layer 7)</h3>
+                <p>Il gateway bilancia il carico (<strong>Round-Robin</strong>) sulle repliche del microservizio Producer in modo automatico e trasparente.</p>
+            </div>
+
+            <div>
+                <h3 style="color: white; margin-bottom: 10px; text-transform: none;">Configurazione Ingress Dichiarativa</h3>
+                <p style="font-size: 16px; color: #94a3b8; margin-bottom: 5px;">Unificazione di Routing, Security e NFP in un unico CRD (Custom Resource Definition).</p>
+                <div class="code-block" style="border-left-color: var(--accent);">
+<span class="keyword">apiVersion:</span> <span class="string">networking.k8s.io/v1</span>
+<span class="keyword">kind:</span> <span class="string">Ingress</span>
+<span class="keyword">metadata:</span>
+  <span class="keyword">annotations:</span>
+    <span class="keyword">konghq.com/plugins:</span> <span class="string">key-auth, global-rate-limit</span>
+<span class="keyword">spec:</span>
+  <span class="keyword">rules:</span>
+  - <span class="keyword">host:</span> <span class="string">producer.nip.io</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SLIDE 6: MONGODB -->
+    <div class="slide">
+        <h2>Persistenza: MongoDB Time Series Collection</h2>
+        <div class="two-col">
+            <!-- Left Column: Data Strategy -->
+            <div>
+                <div class="detail-box storage" style="height: auto;">
+                    <h4 style="color: var(--color-green);"><i class="fa-solid fa-database"></i> Vantaggi Time Series</h4>
+                    <ul style="list-style: none; padding: 0;">
+                        <li style="margin-bottom: 10px;"><i class="fa-solid fa-circle-compress" style="color: var(--color-green); margin-right: 8px;"></i><strong>Compressione Zstd:</strong> Bucket colonnari compressi per un risparmio di disco (~70%).</li>
+                        <li style="margin-bottom: 10px;"><i class="fa-solid fa-magnifying-glass-chart" style="color: var(--color-green); margin-right: 8px;"></i><strong>Efficienza Analitica:</strong> Indici clustered automatici per query veloci.</li>
+                        <li style="margin-bottom: 10px;"><i class="fa-solid fa-trash-can" style="color: var(--color-green); margin-right: 8px;"></i><strong>TTL Automatico:</strong> Gestione automatica della pulizia dei dati "freddi" (30 giorni).</li>
+                    </ul>
+                </div>
+
+                <h3 class="h3-tertiary" style="margin-top: 30px;"><i class="fa-solid fa-key"></i> Configurazione Cloud Native</h3>
+                <ul style="margin-top: 10px;">
+                    <li><strong>ConfigMap:</strong> Parametri non sensibili (Host, Port, DB Name).</li>
+                    <li><strong>Secrets:</strong> Credenziali (User/Pass) iniettate come Env Vars.</li>
+                </ul>
+            </div>
+            
+            <!-- Right Column: Infrastructure -->
+            <div>
+                <h3 class="h3-secondary"><i class="fa-solid fa-cube"></i> StatefulSet per Durabilità</h3>
+                <p>MongoDB è implementato come <strong>StatefulSet</strong> per garantire l'identità stabile (nome, networking) e la riacquisizione della <strong>Persistent Volume Claim (PVC)</strong> dopo il riavvio o un failover.</p>
+                
+                <h3 style="margin-top: 20px;"><i class="fa-solid fa-code"></i> Collection Creation</h3>
+                <p style="font-size: 16px; color: #94a3b8; margin-bottom: 5px;">Definizione della collezione `sensor_data` (Time Field + Meta Field).</p>
+                <div class="code-block" style="border-left-color: var(--color-green); font-size: 13px;">
+<span class="keyword">db.createCollection</span>(<span class="string">"sensor_data"</span>, {
+  <span class="keyword">timeseries:</span> {
+    <span class="keyword">timeField:</span> <span class="string">"timestamp"</span>,
+    <span class="keyword">metaField:</span> <span class="string">"device_id"</span>,
+    <span class="keyword">granularity:</span> <span class="string">"seconds"</span>
+  },
+  <span class="keyword">expireAfterSeconds:</span> <span class="value">2592000</span>  <span style="color: #64748b;">// 30 giorni (TTL automatico)</span>
+});
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SLIDE 7: MICROSERVICES -->
+    <div class="slide">
+        <h2>Microservices Implementation</h2>
+        <p style="margin-bottom: 30px;">Tutti i servizi sono <strong>containerizzati</strong> (Python 3.11) e gestiti come Deployment/StatefulSet su Kubernetes.</p>
+        <div class="grid-3">
+            <div class="card">
+                <i class="fa-brands fa-python ms-icon"></i>
+                <h3>Producer (Ingestion)</h3>
+                <p style="font-size: 16px; color: #94a3b8;">Python / Flask / Kafka-Python</p>
+                <p>Componente <strong>Stateless</strong>. Riceve HTTP da Kong, aggiunge `event_id` e `timestamp` (Idempotency Token) e pubblica su Kafka.</p>
+                <p style="font-size: 14px; color: var(--color-green);">Connessione Kafka: SASL/SSL (TLS 9093).</p>
+            </div>
+            <div class="card">
+                <i class="fa-solid fa-microchip ms-icon"></i>
+                <h3>Consumer (Processing)</h3>
+                <p style="font-size: 16px; color: #94a3b8;">Python / Kafka-Python / PyMongo</p>
+                <p>Componente <strong>Stateful</strong> (Offset). Legge da entrambi i topic, normalizza i dati e salva su Mongo. Gestisce il <strong>buffering</strong> durante il down-time del DB.</p>
+                <p style="font-size: 14px; color: var(--color-green);">Scalabilità: Allineato a 3 repliche per 3 partizioni del topic Telemetry.</p>
+            </div>
+            <div class="card">
+                <i class="fa-solid fa-chart-pie ms-icon"></i>
+                <h3>Metrics Service (Analytics)</h3>
+                <p style="font-size: 16px; color: #94a3b8;">Python / Flask / PyMongo</p>
+                <p>Servizio di <strong>Analytics</strong> e Business Intelligence. Espone metriche aggregate (es. media temperatura per zona) sfruttando l'efficienza degli indici Time Series.</p>
+                <p style="font-size: 14px; color: var(--color-green);">Esposizione: Protetta da Kong Ingress (API Key).</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- SLIDE 8: NFP (Updated and Condensed) -->
+    <div class="slide">
+        <h2>Non-Functional Properties: Validation Matrix</h2>
+        <p style="margin-bottom: 15px;">Le NFP sono validate tramite scenari di test specifici (Demo Live).</p>
+        <div class="nfp-list">
+            <!-- Security -->
+            <div class="nfp-item">
+                <strong><i class="fa-solid fa-lock" style="color:var(--accent);"></i> Security & Secret Management</strong>
+                <ul>
+                    <li><strong>Data in Transit & Auth:</strong> TLS (9093) + SASL/SCRAM per comunicazione cifrata.</li>
+                    <li><strong>Edge Protection:</strong> Plugin API Key (Accesso) e Rate Limiting (Anti-DoS).</li>
+                    <li><strong>Secrets:</strong> Credenziali iniettate solo via K8s Secrets (mai in chiaro).</li>
+                </ul>
+            </div>
+
+            <!-- Resilience -->
+            <div class="nfp-item">
+                <strong><i class="fa-solid fa-heart-pulse" style="color:var(--accent);"></i> Resilience, Fault Tolerance & HA</strong>
+                <ul>
+                    <li><strong>Fault Tolerance:</strong> Kafka agisce da buffer persistente (Zero Data Loss).</li>
+                    <li><strong>Self-Healing:</strong> Kubelet riavvia automaticamente i container in caso di crash.</li>
+                </ul>
+            </div>
+
+            <!-- Scalability -->
+            <div class="nfp-item">
+                <strong><i class="fa-solid fa-chart-line" style="color:var(--accent);"></i> Scalabilità & Load Balancing</strong>
+                <ul>
+                    <li><strong>Ingress LB:</strong> Round-Robin del traffico HTTP sui Producer (Layer 7).</li>
+                    <li><strong>Parallelismo:</strong> Scaling orizzontale dei Consumer sulle partizioni Kafka.</li>
+                </ul>
+            </div>
+
+            <!-- Elasticity -->
+            <div class="nfp-item">
+                <strong><i class="fa-solid fa-up-right-and-down-left-from-center" style="color:var(--accent);"></i> Elasticità & Automazione</strong>
+                <ul>
+                    <li><strong>HPA:</strong> Autoscaling automatico su soglia CPU (50%).</li>
+                    <li><strong>Dynamic Scaling:</strong> Scale Out/Down in base al carico in tempo reale.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <!-- SLIDE 9: SFIDE -->
+    <div class="slide">
+        <h2>Sfide Tecniche & Soluzioni Consapevoli</h2>
+        <div class="grid-3" style="align-items: stretch; height: auto;">
+            <div class="challenge-card">
+                <h4 class="title-challenge">1. Networking & Reachability</h4>
+                <p class="problem">Problema: Docker Desktop Isolation bloccava l'accesso agli Ingress</p>
+                <p class="solution">→ Soluzione: Migrazione a <strong>Minikube driver nativo</strong> per esporre correttamente l'IP del cluster.</p>
+            </div>
+            <div class="challenge-card">
+                <h4 class="title-challenge">2. Idempotency & At-Least-Once</h4>
+                <p class="problem">Problema: Rischio di duplicazione del messaggio in caso di Consumer crash prima del commit (At-Least-Once).</p>
+                <p class="solution">→ Soluzione: Implementazione di <strong>UUID univoco</strong> (`event_id`) in ogni payload (Idempotency Token). <em>Architettura predisposta per upsert</em>.</p>
+            </div>
+            <div class="challenge-card">
+                <h4 class="title-challenge">3. MongoDB Persistenza (Stateful)</h4>
+                <p class="problem">Problema: Deployment stateless causava instabilità del DB. I Pod sostitutivi non potevano reclamare la PVC (Persistent Volume Claim) in caso di failure.</p>
+                <p class="solution">→ Soluzione: Migrazione a <strong>StatefulSet</strong>, che garantisce identità Pod stabile e riacquisizione immediata del disco.</p>
+            </div>
+        </div>
+        
+        <div style="margin-top: 40px;">
+            <h3>Trade-off: Disponibilità vs Durabilità</h3>
+            <ul style="list-style: none; padding: 0;">
+                <li><i class="fa-solid fa-compress" style="color:var(--accent); margin-right:8px;"></i><strong>LZ4 vs Zstd:</strong> Priorità a <strong>LZ4</strong> per la velocità in ingestion (Transport Layer).</li>
+                <li><i class="fa-solid fa-triangle-exclamation" style="color:var(--color-red); margin-right:8px;"></i><strong>min.isr=2 (Alerts):</strong> Accettiamo disponibilità leggermente ridotta per garantire <strong>Zero Data Loss</strong> sui dati critici.</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- SLIDE 10: ROADMAP -->
+    <div class="slide">
+        <h2>Demo Roadmap & Achievement Summary</h2>
+        <div class="two-col" style="height: auto; align-items: stretch;">
+            
+            <div class="card" style="border-left: 4px solid var(--accent); background: #1e293b;">
+                <h4 style="color: var(--accent);">📋 Sequenza di Validazione (20 min)</h4>
+                <div style="margin-bottom: 15px;">
+                    <strong style="color: white; display: block; margin-bottom: 5px; font-size: 20px;">PARTE 1: Test Base</strong>
+                    <ul style="font-size: 18px; list-style: disc; padding-left: 20px;">
+                        <li>Auth Check (401 vs 200)</li>
+                        <li>Pipeline completa (Boot, Telemetry, Alert)</li>
+                        <li>Query MongoDB</li>
+                    </ul>
+                </div>
+                <div>
+                    <strong style="color: white; display: block; margin-bottom: 5px; font-size: 20px;">PARTE 2: NFP Validation</strong>
+                    <ol style="font-size: 18px; list-style: decimal; padding-left: 20px;">
+                        <li><strong>Security:</strong> TLS Verification + SASL</li>
+                        <li><strong>Resilience:</strong> Consumer Crash & Recovery (Buffering)</li>
+                        <li><strong>HA:</strong> Pod Kill & Self-Healing</li>
+                        <li><strong>Scalability:</strong> Manual Scale Out & LB</li>
+                        <li><strong>Elasticità:</strong> HPA Stress Test</li>
+                        <li><strong>Rate Limiting:</strong> DoS Protection (429)</li>
+                    </ol>
+                </div>
+            </div>
+
+            <div class="card" style="border-left: 4px solid var(--color-green); background: #1e293b;">
+                <h4 class="h3-tertiary">🏆 Obiettivi Raggiunti</h4>
+                <ul style="list-style: none; padding: 0;">
+                    <li style="margin-bottom: 15px;">
+                        <strong>KAFKA HA + SECURITY</strong>
+                        <p style="font-size: 16px; color: #94a3b8;">KRaft (No ZK), TLS, SASL/SCRAM, RF=2, min.isr=2 (Alerts).</p>
+                    </li>
+                    <li style="margin-bottom: 15px;">
+                        <strong>KONG GATEWAY OFFLOADING</strong>
+                        <p style="font-size: 16px; color: #94a3b8;">API Key Auth, Rate Limiting, Load Balancing, Configurazione Declarative (CRDs).</p>
+                    </li>
+                    <li style="margin-bottom: 15px;">
+                        <strong>CLOUD-NATIVE & OPTIMIZED STORAGE</strong>
+                        <p style="font-size: 16px; color: #94a3b8;">HPA, <strong>StatefulSet (MongoDB)</strong>, Compressione Ibrida (LZ4/Zstd), Time Series.</p>
+                    </p>
+                    </li>
+                </ul>
+                <div style="margin-top: auto; text-align: center; padding: 15px; background: rgba(56, 189, 248, 0.2); border-radius: 8px;">
+                    <strong style="color: var(--accent); font-size: 22px;">✓ SISTEMA VALIDATO</strong>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SLIDE 11: Q&A -->
+    <div class="slide">
+        <div style="display: flex; flex-direction: column; justify-content: center; height: 100%; text-align: center;">
+            <i class="fa-regular fa-comments accent" style="font-size: 80px; margin-bottom: 30px; color: var(--accent);"></i>
+            <h1>Q & A</h1>
+            <p style="font-size: 24px; color: #94a3b8;">Grazie per l'attenzione. Sono disponibile per domande sull'architettura e l'implementazione.</p>
+            <div style="margin-top: 60px;">
+                <p class="code-block" style="display: inline-block; border: 1px solid rgba(255,255,255,0.1); box-shadow: none;">
+                    github.com/eneamanzi/k8s-kafka-kong
+                </p>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- SCRIPT NUMERAZIONE PAGINE AUTOMATICA -->
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // Seleziona tutte le slide
+        const slides = document.querySelectorAll('.slide');
+        const totalSlides = slides.length;
+
+        // Itera su ogni slide per aggiungere il numero di pagina
+        slides.forEach((slide, index) => {
+            // Crea il div per il numero
+            const pageNumDiv = document.createElement('div');
+            pageNumDiv.className = 'slide-number';
+            // Formato: Slide Corrente / Totale
+            pageNumDiv.textContent = `${index + 1} / ${totalSlides}`;
+            
+            // Aggiungi il div alla slide
+            slide.appendChild(pageNumDiv);
+        });
+    });
+</script>
+
+</body>
+</html>
