@@ -15,7 +15,6 @@
     - [Comando 3: Breakdown Allarmi per Severità](#comando-3-breakdown-allarmi-per-severità)
     - [Comando 4: Statistiche Firmware (Opzionale)](#comando-4-statistiche-firmware-opzionale)
     - [Comando 5: Trend Attività Ultimi 7 Giorni](#comando-5-trend-attività-ultimi-7-giorni)
-    - [Output Atteso](#output-atteso-4)
 - [PARTE 2: NFP Validation](#parte-2-nfp-validation)
   - [2.1 Security](#21-security)
     - [2.1.1 Auth Check](#211-auth-check)
@@ -144,7 +143,6 @@ curl -s -X POST http://producer.$IP.nip.io:$PORT/event/firmware_update \
   -d '{"device_id": "sensor-01", "version_to": "v2.0"}'
 ```
 
-
 **[CHIUDERE Tab 1 - Logs Consumer]**
 > Premere `CTRL+C` per terminare il comando `kubectl logs -f`
 
@@ -156,11 +154,6 @@ curl -s -X POST http://producer.$IP.nip.io:$PORT/event/firmware_update \
 curl -s -H "apikey: $API_KEY" \
   http://metrics.$IP.nip.io:$PORT/metrics/boots | jq
 ```
-
-##### Output Atteso
-```json
-  "total_device_boots": 2
-```
 > "Il sistema ha registrato correttamente 2 eventi di boot (sensor-01 e sensor-02)."
 
 #### Comando 2: Media Temperatura per Zona
@@ -169,13 +162,6 @@ curl -s -H "apikey: $API_KEY" \
   http://metrics.$IP.nip.io:$PORT/metrics/temperature/average-by-zone | jq
 ```
 
-##### Output Atteso
-```json
-  "_id": "warehouse-A",
-  "avg_temp": 28.25,
-  "avg_hum": 37.5,
-  "samples": 2
-```
 > "Il Metrics Service ha eseguito un'aggregation pipeline su MongoDB e ha calcolato le medie.
 > Questa query sfrutta gli indici clustered automatici delle Time Series Collection, garantendo performance elevate anche su dataset molto grandi."
 
@@ -185,22 +171,10 @@ curl -s -H "apikey: $API_KEY" \
   http://metrics.$IP.nip.io:$PORT/metrics/alerts | jq
 ```
 
-##### Output Atteso
-```json
-  "_id": "high",
-  "count": 1
-```
-
 #### Comando 4: Statistiche Firmware (Opzionale)
 ```bash
 curl -s -H "apikey: $API_KEY" \
   http://metrics.$IP.nip.io:$PORT/metrics/firmware | jq
-```
-
-##### Output Atteso
-```json
-  "_id": "v2.0",
-  "count": 1
 ```
 
 
@@ -210,16 +184,9 @@ curl -s -H "apikey: $API_KEY" \
   http://metrics.$IP.nip.io:$PORT/metrics/activity/last7days | jq
 ```
 
-#### Output Atteso
-```json
-  "_id": "2025-12-06",
-  "events_count": 6
-```
-
 ## PARTE 2: NFP Validation
 
 ### 2.1 Security
-
 
 #### 2.1.1 Auth Check 
 > "L'obiettivo è dimostrare il pattern di **Gateway Offloading**: Kong deve bloccare qualsiasi richiesta non autenticata all'edge, restituendo un errore 401 Unauthorized, senza mai raggiungere i microservizi backend."
@@ -250,9 +217,7 @@ curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
 
 Output Atteso
 ```http
-{
   "message": "Unauthorized",
-}
 ```
 > "Anche con un header 'apikey' presente, Kong ha verificato che la chiave 'bad-key-12345' non corrisponde a nessuna credenziale registrata nel Secret Kubernetes 'iot-devices-apikey', quindi ha respinto la richiesta con 'Invalid authentication credentials'."
 
@@ -423,17 +388,6 @@ kubectl wait --for=condition=ready pod -l app=consumer -n kafka --timeout=60s
 ```bash
 # Mostra gli ultimi 20 log e segui in tempo reale
 kubectl logs -n kafka -l app=consumer -f --tail=20
-```
-
-Output Atteso (Nei primi secondi dopo il riavvio)
-```
-Connected to MongoDB (mongo-mongodb-headless.kafka.svc.cluster.local:27017)
-IoT Consumer avviato. In ascolto su: ['sensor-telemetry', 'sensor-alerts']
-[✓] [TELEMETRY] Device offline-sensor-1 -> Temp: 20.0°C, Hum: 50.0%
-[✓] [TELEMETRY] Device offline-sensor-2 -> Temp: 20.0°C, Hum: 50.0%
-[✓] [TELEMETRY] Device offline-sensor-3 -> Temp: 20.0°C, Hum: 50.0%
-[✓] [TELEMETRY] Device offline-sensor-4 -> Temp: 20.0°C, Hum: 50.0%
-[✓] [TELEMETRY] Device offline-sensor-5 -> Temp: 20.0°C, Hum: 50.0%
 ```
 **[CHIUDERE Tab 2]** - Terminare monitoring con CTRL+C
 
