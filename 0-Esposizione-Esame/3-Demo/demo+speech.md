@@ -1,7 +1,7 @@
 # Demo Speech - Architettura Microservizi Event-Driven
 > **Obiettivo:** Validare le proprietà non funzionali (NFP) dell'architettura attraverso scenari di test pratici
 
-- [Setup Iniziale (2 minuti)](#setup-iniziale-2-minuti)
+- [Setup Iniziale](#setup-iniziale)
   - [Verifica Stato Cluster](#verifica-stato-cluster)
 - [TEST BASE: Pipeline Completa](#test-base-pipeline-completa)
   - [SCRITTURA / INVIO DATI](#scrittura--invio-dati)
@@ -29,33 +29,37 @@
     - [**Step 3: Verifica Lag su Kafka (Opzionale - Dimostrativo)**](#step-3-verifica-lag-su-kafka-opzionale---dimostrativo)
     - [**Step 4: Recovery - Riavvio Consumer**](#step-4-recovery---riavvio-consumer)
     - [**Step 5: Verifica Processamento Messaggi Buffered**](#step-5-verifica-processamento-messaggi-buffered)
+    - [Conclusioni](#conclusioni-1)
   - [2.3 High Availability - Self-Healing (3-4 minuti)](#23-high-availability---self-healing-3-4-minuti)
     - [**Step 1: Setup Monitoring Pre-Crash**](#step-1-setup-monitoring-pre-crash)
     - [**Step 2: Simulazione Crash (Pod Kill)**](#step-2-simulazione-crash-pod-kill)
     - [**Step 3: Osservazione Recovery in Real-Time**](#step-3-osservazione-recovery-in-real-time)
+    - [Conclusioni](#conclusioni-2)
   - [2.4 Scalabilità - Manual Scale \& Load Balancing (5-6 minuti)](#24-scalabilità---manual-scale--load-balancing-5-6-minuti)
     - [**Step 1: Scaling Manuale dei Microservizi**](#step-1-scaling-manuale-dei-microservizi)
     - [**Step 2: Burst Test - Injection Carico Massivo**](#step-2-burst-test---injection-carico-massivo)
     - [**Step 3: Validazione Load Balancing - Producer (HTTP Layer)**](#step-3-validazione-load-balancing---producer-http-layer)
     - [**Step 4: Validazione Parallelism - Consumer (Kafka Layer)**](#step-4-validazione-parallelism---consumer-kafka-layer)
     - [**Step 5: Restore Replicas**](#step-5-restore-replicas)
+    - [Conclusioni](#conclusioni-3)
   - [2.5 Elasticità - Horizontal Pod Autoscaler (4-5 minuti)](#25-elasticità---horizontal-pod-autoscaler-4-5-minuti)
     - [**Step 1: Deploy HPA Configuration**](#step-1-deploy-hpa-configuration)
     - [**Step 2: Stress Test - Generazione Carico Pesante**](#step-2-stress-test---generazione-carico-pesante)
     - [**Step 3: Monitoring HPA in Real-Time**](#step-3-monitoring-hpa-in-real-time)
     - [**Step 4: Cleanup HPA**](#step-4-cleanup-hpa)
+    - [Conclusioni](#conclusioni-4)
   - [2.6 Rate Limiting - DoS Protection (3-4 minuti)](#26-rate-limiting---dos-protection-3-4-minuti)
     - [**Step 1: Deploy Rate Limiting Plugin**](#step-1-deploy-rate-limiting-plugin)
     - [**Step 2: Attivazione Plugin su Ingress**](#step-2-attivazione-plugin-su-ingress)
     - [**Step 3: Flood Test - Saturazione Soglia**](#step-3-flood-test---saturazione-soglia)
     - [**Step 4: Cleanup Rate Limiting**](#step-4-cleanup-rate-limiting)
+    - [Conclusioni](#conclusioni-5)
 - [Conclusione Demo](#conclusione-demo)
 
 
-
-
-## Setup Iniziale (2 minuti)
-> "Prima di iniziare con i test, devo configurare le variabili d'ambiente necessarie per comunicare con il cluster."
+## Setup Iniziale
+> "Prima di iniziare con i test, devo configurare le variabili d'ambiente necessarie per comunicare con il cluster." \
+> "Queste variabili verranno utilizzate in tutti i comandi `curl` successivi grazie al servizio nip.io, che risolve dinamicamente i sottodomini producer e metrics direttamente all'IP del cluster."
 ```bash
 export IP=$(minikube ip)
 export PORT=$(minikube service kong-kong-proxy -n kong --url | head -n 1 | awk -F: '{print $3}')
@@ -64,8 +68,6 @@ export API_KEY="iot-sensor-key-prod-v1"
 echo "Target (IP:PORT): $IP:$PORT"
 echo "API Key: $API_KEY"
 ```
-
-> "Queste variabili verranno utilizzate in tutti i comandi `curl` successivi grazie al servizio nip.io, che risolve dinamicamente i sottodomini producer e metrics direttamente all'IP del cluster."
 
 ### Verifica Stato Cluster 
 > "Prima di iniziare, verifico rapidamente lo stato dei componenti principali dell'architettura per assicurarmi che tutto sia operativo."
@@ -86,8 +88,9 @@ kubectl get svc -n kong kong-kong-proxy
 > L'obiettivo è dimostrare che i dati attraversano correttamente tutta la pipeline: Producer → Kafka → Consumer → MongoDB, e che il routing intelligente funziona, con i dati operativi che vanno sul topic 'sensor-telemetry' (ottimizzato con compressione LZ4) e gli allarmi su 'sensor-alerts' (configurato per massima durabilità)."
 
 ### SCRITTURA / INVIO DATI
-**[APRIRE NUOVO TERMINALE - Tab 1]** - Log Monitoring Consumer
-> "Per visualizzare in tempo reale il processamento dei messaggi, apro un terminale parallelo dove monitoro i log del Consumer. Questo ci permetterà di vedere esattamente quando ogni evento viene consumato da Kafka e salvato su MongoDB."
+
+**[APRIRE NUOVO TERMINALE - Tab 1]**
+> "Per visualizzare in tempo reale il processamento dei messaggi, apro un terminale parallelo dove monitoro i log del Consumer."
 
 ```bash
 # Monitoring continuo dei log del Consumer con filtraggio per eventi recenti
@@ -146,7 +149,7 @@ curl -s -X POST http://producer.$IP.nip.io:$PORT/event/firmware_update \
 > Premere `CTRL+C` per terminare il comando `kubectl logs -f`
 
 ### LETTURA / ANALITICHE Metrics Service
-> "Il Metrics Service espone diverse API per l'analisi dei dati. Testerò tre endpoint chiave: conteggio boot, media temperatura per zona, e breakdown degli allarmi per severità."
+> "Il Metrics Service espone diverse API per l'analisi dei dati.
 
 #### Comando 1: Totale Boot Events
 ```bash
@@ -173,9 +176,8 @@ curl -s -H "apikey: $API_KEY" \
   "avg_hum": 37.5,
   "samples": 2
 ```
-> "Eccellente! Il Metrics Service ha eseguito un'aggregation pipeline su MongoDB e ha calcolato le medie:
+> "Il Metrics Service ha eseguito un'aggregation pipeline su MongoDB e ha calcolato le medie.
 > Questa query sfrutta gli indici clustered automatici delle Time Series Collection, garantendo performance elevate anche su dataset molto grandi."
-
 
 #### Comando 3: Breakdown Allarmi per Severità
 ```bash
@@ -189,9 +191,6 @@ curl -s -H "apikey: $API_KEY" \
   "count": 1
 ```
 
-> "Perfetto! Il sistema ha registrato 1 allarme di severità 'high' (il CRITICAL_OVERHEAT del sensor-02). In un sistema reale, avremmo anche severità 'medium' e 'low', ma per questa demo abbiamo solo eventi critici."
-
-
 #### Comando 4: Statistiche Firmware (Opzionale)
 ```bash
 curl -s -H "apikey: $API_KEY" \
@@ -203,8 +202,6 @@ curl -s -H "apikey: $API_KEY" \
   "_id": "v2.0",
   "count": 1
 ```
-
-> "Il sistema mostra che 1 dispositivo sta eseguendo l'aggiornamento alla versione 2.0."
 
 
 #### Comando 5: Trend Attività Ultimi 7 Giorni
@@ -218,11 +215,6 @@ curl -s -H "apikey: $API_KEY" \
   "_id": "2025-12-06",
   "events_count": 6
 ```
-
-> "Perfetto! Questa query mostra che oggi  il sistema ha processato 6 eventi. 
-> Procediamo ora con la seconda parte: la validazione delle proprietà non funzionali."
-
-
 
 ## PARTE 2: NFP Validation
 
@@ -259,7 +251,7 @@ curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
 Output Atteso
 ```http
 {
-  "message": "Invalid authentication credentials"
+  "message": "Unauthorized",
 }
 ```
 > "Anche con un header 'apikey' presente, Kong ha verificato che la chiave 'bad-key-12345' non corrisponde a nessuna credenziale registrata nel Secret Kubernetes 'iot-devices-apikey', quindi ha respinto la richiesta con 'Invalid authentication credentials'."
@@ -290,8 +282,8 @@ HTTP/1.1 200 OK
 }
 ```
 
-> "Questa volta abbiamo ricevuto un 200 OK. Il Producer ha accettato la richiesta, l'ha processata e ha restituito il payload arricchito. Notate tre elementi chiave nel response: \
-> Questo dimostra che il pattern di Gateway Offloading funziona correttamente: l'autenticazione avviene all'edge tramite Kong, il quale inoltra solo le richieste valide al backend. Il Producer non contiene alcuna logica di autenticazione - si concentra esclusivamente sul business logic di arricchimento e routing dei messaggi verso Kafka."
+> "Questa volta abbiamo ricevuto un 200 OK. Il Producer ha accettato la richiesta, l'ha processata e ha restituito il payload arricchito.\
+> Questo dimostra che il pattern di Gateway Offloading funziona correttamente: l'autenticazione avviene all'edge tramite Kong, il quale inoltra solo le richieste valide al backend.
 > Kong protegge l'edge con API Key authentication.
 
 
@@ -362,96 +354,97 @@ kubectl get secret -n kafka mongo-creds -o yaml | grep "MONGO_"
 
 
 ### 2.2 Fault Tolerance - Consumer Crash & Buffering (4-5 minuti)
-> "Ora testiamo una proprietà critica per sistemi distribuiti: la Fault Tolerance. L'obiettivo è dimostrare che il sistema non perde dati anche in caso di crash totale del Consumer. Questo è possibile grazie alla natura asincrona di Kafka, che funge da buffer persistente tra Producer e Consumer. Il disaccoppiamento tramite messaggistica permette ai due componenti di operare indipendentemente: se il Consumer crasha, i messaggi si accumulano su Kafka e vengono processati non appena il servizio torna online, garantendo Zero Data Loss."
+> "Ora testiamo una proprietà critica per sistemi distribuiti: la Fault Tolerance. \
+> L'obiettivo è dimostrare che il sistema non perde dati anche in caso di crash totale del Consumer. Questo è possibile grazie alla natura asincrona di Kafka, che funge da buffer persistente tra Producer e Consumer. Il **disaccoppiamento** tramite messaggistica permette ai due componenti di operare indipendentemente: se il Consumer crasha, i messaggi si accumulano su Kafka e vengono processati non appena il servizio torna online, garantendo Zero Data Loss."
 
 #### **Step 1: Simulazione Crash Consumer**
-    > "Primo step: simulo un crash totale scalando il Consumer a zero repliche. Questo equivale a un guasto hardware del nodo che ospita il pod, o a un crash irrecuperabile del processo Python."
+> "Primo step: simulo un crash totale scalando il Consumer a zero repliche. Questo equivale a un guasto hardware del nodo che ospita il pod, o a un crash irrecuperabile del processo Python."
 
-    ```bash
-    kubectl scale deploy/consumer -n kafka --replicas=0
-    ```
+```bash
+kubectl scale deploy/consumer -n kafka --replicas=0
+```
 
 #### **Step 2: Invio Eventi Durante Downtime**
-    > "Ora invio 5 eventi di telemetria mentre il Consumer è offline. Questi messaggi verranno accettati dal Producer e bufferizzati su Kafka, ma non potranno essere consumati finché il worker non torna online."
+> "Ora invio 5 eventi di telemetria mentre il Consumer è offline. Questi messaggi verranno accettati dal Producer e bufferizzati su Kafka, ma non potranno essere consumati finché il worker non torna online."
 
-    ```bash
-    echo "Invio eventi durante downtime del Consumer..."
-    for i in {1..5}; do
-      RESPONSE=$(curl -s -X POST http://producer.$IP.nip.io:$PORT/event/telemetry \
-        -H "apikey: $API_KEY" \
-        -H "Content-Type: application/json" \
-        -d "{\"device_id\":\"offline-sensor-$i\", \"zone_id\":\"buffer-test\", \"temperature\": 20.0, \"humidity\": 50.0}")
-      
-      # Estrai event_id dalla risposta per tracking
-      EVENT_ID=$(echo $RESPONSE | jq -r '.event.event_id')
-      echo "  [$i/5] Inviato offline-sensor-$i (Event ID: ${EVENT_ID:0:8}...)"
-    done
-    echo "Completato invio di 5 eventi."
-    ```
+```bash
+echo "Invio eventi durante downtime del Consumer..."
+for i in {1..5}; do
+  RESPONSE=$(curl -s -X POST http://producer.$IP.nip.io:$PORT/event/telemetry \
+    -H "apikey: $API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"device_id\":\"offline-sensor-$i\", \"zone_id\":\"buffer-test\", \"temperature\": 20.0, \"humidity\": 50.0}")
+  
+  # Estrai event_id dalla risposta per tracking
+  EVENT_ID=$(echo $RESPONSE | jq -r '.event.event_id')
+  echo "  [$i/5] Inviato offline-sensor-$i (Event ID: ${EVENT_ID:0:8}...)"
+done
+echo "Completato invio di 5 eventi."
+```
 
 
 #### **Step 3: Verifica Lag su Kafka (Opzionale - Dimostrativo)**
-    > "Per dimostrare visivamente che i messaggi sono effettivamente bufferizzati su Kafka, possiamo interrogare il Consumer Group per vedere il lag - ovvero quanti messaggi sono in attesa di essere consumati."
-    ```bash
-    # Esegui all'interno di un pod broker Kafka per usare i tool di Kafka
-    kubectl exec -it -n kafka iot-sensor-cluster-broker-0 -- \
-      /opt/kafka/bin/kafka-consumer-groups.sh \
-        --bootstrap-server localhost:9092 \
-        --group iot-consumer-group \
-        --describe
-    ```
+> "Per dimostrare visivamente che i messaggi sono effettivamente bufferizzati su Kafka, possiamo interrogare il Consumer Group per vedere il lag - ovvero quanti messaggi sono in attesa di essere consumati."
+```bash
+# Esegui all'interno di un pod broker Kafka per usare i tool di Kafka
+kubectl exec -it -n kafka iot-sensor-cluster-broker-0 -- \
+  /opt/kafka/bin/kafka-consumer-groups.sh \
+    --bootstrap-server localhost:9092 \
+    --group iot-consumer-group \
+    --describe
+```
 
-    Output Atteso (Semplificato)
-    ```
-    GROUP             TOPIC            PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG
-    iot-consumer-group sensor-telemetry 0         15              17              2
-    iot-consumer-group sensor-telemetry 1         12              14              2
-    iot-consumer-group sensor-telemetry 2         10              11              1
-    ```
+Output Atteso (Semplificato)
+```
+GROUP             TOPIC            PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG
+iot-consumer-group sensor-telemetry 0         15              17              2
+iot-consumer-group sensor-telemetry 1         12              14              2
+iot-consumer-group sensor-telemetry 2         10              11              1
+```
 
-    > "Perfetto! Vedete la colonna 'LAG'? Mostra che ci sono messaggi non consumati (LAG > 0) sulle partizioni. Il totale è 5 (2+2+1), corrispondente esattamente ai 5 eventi che abbiamo inviato. Questi messaggi sono persistiti su disco e aspettano il Consumer. Ora procediamo al recovery."
+> "La colonna 'LAG' mostra che ci sono messaggi non consumati (LAG > 0) sulle partizioni. Il totale è 5 (2+2+1), corrispondente esattamente ai 5 eventi che abbiamo inviato. Questi messaggi sono persistiti su disco e aspettano il Consumer. Ora procediamo al recovery."
 
 
 #### **Step 4: Recovery - Riavvio Consumer**
+> "Ora simulo il ripristino del servizio riportando il Consumer a 1 replica. Kubernetes creerà un nuovo pod, che al boot richiederà gli offset committati al Consumer Group, e riprenderà la lettura esattamente dal punto in cui si era interrotto, processando tutti i messaggi accumulati."
 
-    > "Ora simulo il ripristino del servizio riportando il Consumer a 1 replica. Kubernetes creerà un nuovo pod, che al boot richiederà gli offset committati al Consumer Group, e riprenderà la lettura esattamente dal punto in cui si era interrotto, processando tutti i messaggi accumulati."
+```bash
+kubectl scale deploy/consumer -n kafka --replicas=1
 
-    ```bash
-    kubectl scale deploy/consumer -n kafka --replicas=1
+# Attendi che il pod sia ready
+kubectl wait --for=condition=ready pod -l app=consumer -n kafka --timeout=60s
+```
 
-    # Attendi che il pod sia ready
-    kubectl wait --for=condition=ready pod -l app=consumer -n kafka --timeout=60s
-    ```
-
-    > "Il Consumer è tornato online. Ora apro il monitoring dei log per vedere in tempo reale il processamento dei messaggi accumulati."
+> "Il Consumer è tornato online. Ora apro il monitoring dei log per vedere in tempo reale il processamento dei messaggi accumulati."
 
 #### **Step 5: Verifica Processamento Messaggi Buffered**
 
-    **[APRIRE NUOVO TERMINALE - Tab 2]** - Monitoring Recovery
-    ```bash
-    # Mostra gli ultimi 20 log e segui in tempo reale
-    kubectl logs -n kafka -l app=consumer -f --tail=20
-    ```
+**[APRIRE NUOVO TERMINALE - Tab 2]** - Monitoring Recovery
+```bash
+# Mostra gli ultimi 20 log e segui in tempo reale
+kubectl logs -n kafka -l app=consumer -f --tail=20
+```
 
-    Output Atteso (Nei primi secondi dopo il riavvio)
-    ```
-    Connected to MongoDB (mongo-mongodb-headless.kafka.svc.cluster.local:27017)
-    IoT Consumer avviato. In ascolto su: ['sensor-telemetry', 'sensor-alerts']
-    [✓] [TELEMETRY] Device offline-sensor-1 -> Temp: 20.0°C, Hum: 50.0%
-    [✓] [TELEMETRY] Device offline-sensor-2 -> Temp: 20.0°C, Hum: 50.0%
-    [✓] [TELEMETRY] Device offline-sensor-3 -> Temp: 20.0°C, Hum: 50.0%
-    [✓] [TELEMETRY] Device offline-sensor-4 -> Temp: 20.0°C, Hum: 50.0%
-    [✓] [TELEMETRY] Device offline-sensor-5 -> Temp: 20.0°C, Hum: 50.0%
-    ```
-    **[CHIUDERE Tab 2]** - Terminare monitoring con CTRL+C
+Output Atteso (Nei primi secondi dopo il riavvio)
+```
+Connected to MongoDB (mongo-mongodb-headless.kafka.svc.cluster.local:27017)
+IoT Consumer avviato. In ascolto su: ['sensor-telemetry', 'sensor-alerts']
+[✓] [TELEMETRY] Device offline-sensor-1 -> Temp: 20.0°C, Hum: 50.0%
+[✓] [TELEMETRY] Device offline-sensor-2 -> Temp: 20.0°C, Hum: 50.0%
+[✓] [TELEMETRY] Device offline-sensor-3 -> Temp: 20.0°C, Hum: 50.0%
+[✓] [TELEMETRY] Device offline-sensor-4 -> Temp: 20.0°C, Hum: 50.0%
+[✓] [TELEMETRY] Device offline-sensor-5 -> Temp: 20.0°C, Hum: 50.0%
+```
+**[CHIUDERE Tab 2]** - Terminare monitoring con CTRL+C
 
-> "Eccellente! Guardate i log: nel giro di pochi secondi, il Consumer ha:
+> "Guardate i log: nel giro di pochi secondi, il Consumer ha:
 > 1. Completato il bootstrap (connessione a MongoDB e Kafka)
 > 2. Sottoscritto i topic 'sensor-telemetry' e 'sensor-alerts'
 > 3. Richiesto al Kafka Broker l'ultimo offset committato per il suo Consumer Group
 > 4. Processato immediatamente i 5 messaggi che erano rimasti in coda durante il downtime
-> 
-> Notate la sequenza: offline-sensor-1, 2, 3, 4, 5 - l'ordine è stato preservato. Questo è garantito dal partizionamento di Kafka: i messaggi nella stessa partizione mantengono sempre l'ordine FIFO."
+
+
+#### Conclusioni
 
 > Questo test dimostra la Fault Tolerance dell'architettura Event-Driven:
 > 1. **Disaccoppiamento**: Producer e Consumer operano indipendentemente
@@ -501,6 +494,7 @@ producer-7d8f9c6b5d-xyz78   1/1     Running             0    18s
 > Ma questo test dimostra che il recovery è completamente automatico. In produzione, con 2+ repliche, il downtime sarebbe ZERO: Kong e il Service Kubernetes avrebbero immediatamente rediretto il traffico alle repliche superstiti."
 
 
+#### Conclusioni 
 > "Questo test ha dimostrato tre meccanismi fondamentali di Kubernetes:
 > 1. **Self-Healing Automatico**: 
 >    - Il ReplicaSet controlla costantemente che il numero di pod in Running corrisponda allo stato desiderato
@@ -545,7 +539,7 @@ echo "=== VERIFICA STATO POD ==="
 kubectl get pods -n kafka -l "app in (producer, consumer)"
 ```
 
-> "Perfetto! Ora abbiamo 2 repliche del Producer e 3 del Consumer, tutte in stato Running. 
+> "Ora abbiamo 2 repliche del Producer e 3 del Consumer, tutte in stato Running. 
 
 
 #### **Step 2: Burst Test - Injection Carico Massivo**
@@ -595,7 +589,7 @@ echo "  Richieste processate: $COUNT_2"
 echo ""
 echo "Totale: $((COUNT_1 + COUNT_2))/50"
 
-# Mostra campione di log per conferma visiva
+# Campione di log
 echo ""
 echo "=== CAMPIONE LOG PRODUCER 1 (prime 3 righe) ==="
 kubectl logs -n kafka $PRODUCER_1 --tail=50 | grep "load-test" | head -n 3
@@ -717,6 +711,7 @@ echo "=== STATO FINALE ==="
 kubectl get pods -n kafka -l "app in (producer, consumer)"
 ```
 
+#### Conclusioni
 
 > **Scalabilità Orizzontale**:
 > - Possibilità di aumentare il numero di repliche per gestire carichi maggiori
@@ -756,12 +751,7 @@ echo "=== STATO INIZIALE HPA ==="
 kubectl get hpa -n kafka
 kubectl get hpa -n metrics
 ```
-
-> "L'HPA è attivo. Vediamo:
-> - **TARGETS**: 0%/50% significa che l'utilizzo CPU attuale è 0% (sistema idle) e la soglia target è 50%
-> - **MINPODS/MAXPODS**: Vincoli di scaling - minimo 1 replica, massimo 4
-> - **REPLICAS**: Numero attuale di pod (1 per tutti)
-> 
+ 
 > L'HPA interroga il Metrics Server di Kubernetes ogni 15 secondi per ottenere le metriche CPU/RAM dei pod. Quando rileva che la media supera il 50%, inizia il processo di scale-out."
 
 
@@ -809,14 +799,10 @@ kubectl get hpa -n kafka -w
 
 > **Fase 1 - Detection (T+0-30s)**:
 > - L'HPA rileva che il TARGETS (CPU) sta salendo rapidamente
-> - A 68% (sopra la soglia del 50%), decide di scalare
-> - REPLICAS passa da 1 a 2 per il Producer
 > 
 > **Fase 2 - Scale Out Aggressivo (T+30-120s)**:
 > - La CPU continua a salire perché ci sono ancora migliaia di richieste in coda su Kafka
 > - L'HPA aggiunge repliche rapidamente: 2 → 3 → 4 (massimo raggiunto)
-> - Vedete alcuni pod in stato 'ContainerCreating' o 'Pending'
-> - Il Consumer scala più lentamente perché il suo carico CPU è inferiore
 > 
 > **Fase 3 - Stabilizzazione (T+120-300s)**:
 > - Tutte le 4 repliche del Producer sono Running
@@ -844,7 +830,8 @@ kubectl delete -f K8s/hpa.yaml
 kubectl get hpa -A
 ```
 
-> "HPA rimosso. Questo test ha dimostrato l'elasticità automatica cloud-native:
+#### Conclusioni
+> Questo test ha dimostrato l'elasticità automatica cloud-native:
 > 
 > **Vantaggi dell'Auto-Scaling**:
 > 1. **Resilienza ai picchi**: Il sistema assorbe automaticamente carichi imprevisti
@@ -923,10 +910,10 @@ for i in {1..20}; do
   
   if [ "$HTTP_CODE" == "200" ]; then
     SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-    echo "  [$i] ✓ HTTP 200 OK"
+    echo "  [$i] OK HTTP 200 OK"
   elif [ "$HTTP_CODE" == "429" ]; then
     THROTTLED_COUNT=$((THROTTLED_COUNT + 1))
-    echo "  [$i] ✗ HTTP 429 Too Many Requests (THROTTLED)"
+    echo "  [$i] KO - HTTP 429 Too Many Requests (THROTTLED)"
   else
     echo "  [$i] ? HTTP $HTTP_CODE"
   fi
@@ -941,7 +928,7 @@ echo "  Richieste bloccate: $THROTTLED_COUNT"
 echo "  Totale: $((SUCCESS_COUNT + THROTTLED_COUNT))/20"
 ```
 
-> "Perfetto! Il rate limiting ha funzionato esattamente come previsto:
+> "Il rate limiting ha funzionato esattamente come previsto:
 > - **Prime 5 richieste**: Accettate (200 OK) - dentro il limite di 5 req/sec
 > - **Richieste 6-20**: Bloccate (429) - soglia superata
 > 
@@ -961,27 +948,13 @@ kubectl patch ingress producer-ingress -n kafka \
 
 ```
 
+#### Conclusioni
 
 > **Protezione Implementata**:
 > - Limite configurabile (5 req/sec, ma può essere adattato al contesto)
 > - Blocco all'edge: traffico malevolo non raggiunge mai il backend
 > - Header informativi per client smart
 > - Policy dichiarativa: nessuna logica nel codice applicativo
-> 
-> **Scenari di Produzione**:
-> 1. **Protezione Infrastruttura**: Prevenire saturazione risorse durante attacchi
-> 2. **Fairness Multi-Tenant**: Garantire quote eque tra diversi clienti
-> 3. **Cost Control**: Limitare uso API per tier freemium
-> 4. **Bug Mitigation**: Proteggere da loop infiniti client-side
-> 
-> **Configurazioni Avanzate**:
-> - Rate limit differenziati per endpoint (es. /boot: 10/sec, /telemetry: 100/sec)
-> - Limiti basati su identità consumer (API Key) invece che IP
-> - Policy cluster-wide con Redis per conteggi distribuiti
-> - Burst allowance: permettere brevi picchi oltre il limite
-> - Gradual throttling: rallentare invece di bloccare completamente
-
-
 
 ## Conclusione Demo
 > "Questo conclude la dimostrazione pratica delle proprietà non funzionali dell'architettura a microservizi Event-Driven su Kubernetes.
