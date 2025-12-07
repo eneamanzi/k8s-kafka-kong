@@ -78,6 +78,7 @@ spec:
   behavior:
     scaleDown:
       stabilizationWindowSeconds: 60    # Discesa lenta e stabile
+      selectPolicy: Max
       policies:
       - type: Percent
         value: 50
@@ -85,9 +86,10 @@ spec:
       - type: Pods
         value: 1
         periodSeconds: 15
-      selectPolicy: Max
+
     scaleUp:
       stabilizationWindowSeconds: 0   # Salita aggressiva per non accumulare lag su Kafka
+      selectPolicy: Max
       policies:
       - type: Percent
         value: 100
@@ -95,7 +97,6 @@ spec:
       - type: Pods
         value: 2
         periodSeconds: 15
-      selectPolicy: Max
 
 ---
 # --- HPA METRICS SERVICE ---
