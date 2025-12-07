@@ -88,7 +88,7 @@ kubectl get svc -n kong kong-kong-proxy
 
 ### SCRITTURA / INVIO DATI
 
-**[APRIRE NUOVO TERMINALE - Tab 1]**
+**[APRIRE NUOVO TERMINALE]**
 > "Per visualizzare in tempo reale il processamento dei messaggi, apro un terminale parallelo dove monitoro i log del Consumer."
 
 ```bash
@@ -147,7 +147,7 @@ curl -s -X POST http://producer.$IP.nip.io:$PORT/event/firmware_update \
   -d '{"device_id": "sensor-01", "version_to": "v2.0"}'
 ```
 
-**[CHIUDERE Tab 1 - Logs Consumer]**
+**[CHIUDERE Terminale Monitoring Logs Consumer]**
 
 ### LETTURA / ANALITICHE Metrics Service
 > "Il Metrics Service espone diverse API per l'analisi dei dati.
@@ -395,13 +395,13 @@ kubectl wait --for=condition=ready pod -l app=consumer -n kafka --timeout=60s
 
 #### **Step 5: Verifica Processamento Messaggi Buffered**
 
-**[APRIRE NUOVO TERMINALE - Tab 2]** - Monitoring Recovery
+**[APRIRE NUOVO TERMINALE]** - Monitoring Recovery
 ```bash
 echo -e "\n\033[1;31m[FAULT - 5] Controllo processamente messaggi bufferizzati\033[0m"
 # Mostra gli ultimi 20 log e segui in tempo reale
 kubectl logs -n kafka -l app=consumer -f --tail=20
 ```
-**[CHIUDERE Tab 2]** - Terminare monitoring con CTRL+C
+**[CHIUDERE TERMINALE moitoring consumer]** - Terminare monitoring con CTRL+C
 
 > "Guardate i log: nel giro di pochi secondi, il Consumer ha:
 > 1. Completato il bootstrap (connessione a MongoDB e Kafka)
@@ -427,7 +427,7 @@ kubectl logs -n kafka -l app=consumer -f --tail=20
 
 > "Prima di causare il guasto, avvio un watcher in tempo reale sui pod del Producer. Questo ci permetterà di vedere esattamente cosa succede durante il crash e il recovery: termination del vecchio pod, creazione del nuovo, e transizioni di stato."
 
-**[APRIRE NUOVO TERMINALE - Tab 3]** - Pod Watcher
+**[APRIRE NUOVO TERMINALE]** - Pod Watcher
 ```bash
 echo -e "\n\033[1;31m[HA - 1] Watcher/Monitoring per controllo stato pod\033[0m"
 
@@ -768,7 +768,7 @@ echo "=== STRESS TEST COMPLETATO ==="
 
 > "Apro un watcher dell'HPA che si aggiorna ogni secondo. Vedrete il campo TARGETS (utilizzo CPU) salire, e poi il campo REPLICAS aumentare man mano che Kubernetes crea nuovi pod."
 
-**[APRIRE NUOVO TERMINALE - Tab 5]** - HPA Live Monitoring
+**[APRIRE NUOVO TERMINALE]** - HPA Live Monitoring
 ```bash
 echo -e "\n\033[1;31m[ELAS - 3] HPA Live Monitoring (refresh)\033[0m"
 watch -n 1 'kubectl get hpa -n kafka'

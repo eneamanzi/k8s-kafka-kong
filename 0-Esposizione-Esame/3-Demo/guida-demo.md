@@ -1,51 +1,3 @@
-
-# Guida
-## Gestione Terminali Durante la Demo
-
-**Terminale Principale** (Tab 0):
-- Comandi principali della demo
-- Test e validazioni
-
-**Tab 1** - Consumer Logs (Parte 1: Pipeline Test):
-```bash
-kubectl logs -l app=consumer -n kafka -f --tail=0
-```
-- Aprire durante test pipeline (Sezione 1.2)
-- Chiudere dopo verifica metriche
-
-**Tab 2** - Consumer Recovery Logs (Parte 2: Fault Tolerance):
-```bash
-kubectl logs -n kafka -l app=consumer -f --tail=20
-```
-- Aprire durante recovery post-crash (Sezione 2.2)
-- Chiudere dopo conferma processamento messaggi
-
-**Tab 3** - Pod Watcher (Parte 2: Self-Healing):
-```bash
-kubectl get pods -n kafka -l app=producer -w
-```
-- Aprire durante test self-healing (Sezione 2.3)
-- Chiudere dopo ripristino pod
-
-**Tab 4** - Availability Monitor (Parte 2: Self-Healing - Opzionale):
-```bash
-# Loop continuo per monitorare disponibilità
-while true; do 
-  curl -s -o /dev/null -w "%{http_code} " ...
-  sleep 0.5
-done
-```
-- Aprire prima del kill pod (Sezione 2.3)
-- Chiudere dopo dimostrazione zero-downtime
-
-**Tab 5** - HPA Monitor (Parte 2: Elasticità):
-```bash
-watch -n 1 'kubectl get hpa -n kafka; echo ""; kubectl get pods -n kafka'
-```
-- Aprire dopo stress test (Sezione 2.5)
-- Chiudere quando HPA torna a 1 replica
-
-
 ## Troubleshooting Rapido
 
 ### Se un comando fallisce:
@@ -94,6 +46,12 @@ kubectl exec -it statefulset/mongo-mongodb -n kafka -- mongosh iot_network \
   -u root -p $MONGODB_ROOT_PASSWORD \
   --authenticationDatabase admin \
   --eval "print('Documenti rimanenti: ' + db.sensor_data.countDocuments())"
+
+#Stampa il contenuto della Collection sensor_data
+kubectl exec -it statefulset/mongo-mongodb -n kafka -- mongosh iot_network \
+  -u root -p $MONGODB_ROOT_PASSWORD \
+  --authenticationDatabase admin \
+  --eval "printjson(db.sensor_data.find().toArray())"
 ```
 
 ### Verifica Stato Completo Cluster
