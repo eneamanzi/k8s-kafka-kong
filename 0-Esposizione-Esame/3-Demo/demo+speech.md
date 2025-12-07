@@ -13,7 +13,7 @@
     - [Comando 1: Totale Boot Events](#comando-1-totale-boot-events)
     - [Comando 2: Media Temperatura per Zona](#comando-2-media-temperatura-per-zona)
     - [Comando 3: Breakdown Allarmi per Severità](#comando-3-breakdown-allarmi-per-severità)
-    - [Comando 4: Statistiche Firmware (Opzionale)](#comando-4-statistiche-firmware-opzionale)
+    - [Comando 4: Statistiche Firmware](#comando-4-statistiche-firmware)
     - [Comando 5: Trend Attività Ultimi 7 Giorni](#comando-5-trend-attività-ultimi-7-giorni)
 - [PARTE 2: NFP Validation](#parte-2-nfp-validation)
   - [2.1 Security](#21-security)
@@ -100,6 +100,7 @@ kubectl logs -l app=consumer -n kafka -f --tail=0
 
 #### **Evento 1: Device Boot** (Accensione Sensore)
 ```bash
+echo -e "\n\033[1;31m[INSERT Base1] Device Boot\033[0m"
 curl -s -X POST http://producer.$IP.nip.io:$PORT/event/boot \
   -H "apikey: $API_KEY" \
   -H "Content-Type: application/json" \
@@ -114,6 +115,7 @@ curl -s -X POST http://producer.$IP.nip.io:$PORT/event/boot \
 
 #### **Evento 2: Telemetry Data** (Dati Ambientali Normali)
 ```bash
+echo -e "\n\033[1;31m[INSERT base2] Invio Telemetria\033[0m"
 curl -s -X POST http://producer.$IP.nip.io:$PORT/event/telemetry \
   -H "apikey: $API_KEY" \
   -H "Content-Type: application/json" \
@@ -129,6 +131,7 @@ curl -s -X POST http://producer.$IP.nip.io:$PORT/event/telemetry \
 
 #### **Evento 3: Critical Alert** (Allarme Critico)
 ```bash
+echo -e "\n\033[1;31m[INSERT base3]  CRITICAL ALERT \033[0m"
 curl -s -X POST http://producer.$IP.nip.io:$PORT/event/alert \
   -H "apikey: $API_KEY" \
   -H "Content-Type: application/json" \
@@ -137,6 +140,7 @@ curl -s -X POST http://producer.$IP.nip.io:$PORT/event/alert \
 
 #### **Evento 4: Firmware Update** (Aggiornamento OTA)
 ```bash
+echo -e "\n\033[1;31m[INSERT base4]  Firmware Update \033[0m"
 curl -s -X POST http://producer.$IP.nip.io:$PORT/event/firmware_update \
   -H "apikey: $API_KEY" \
   -H "Content-Type: application/json" \
@@ -150,30 +154,35 @@ curl -s -X POST http://producer.$IP.nip.io:$PORT/event/firmware_update \
 
 #### Comando 1: Totale Boot Events
 ```bash
+echo -e "\n\033[1;31m[METRICS base1]  Totale Boot Events \033[0m"
 curl -s -H "apikey: $API_KEY" \
   http://metrics.$IP.nip.io:$PORT/metrics/boots | jq
 ```
 
 #### Comando 2: Media Temperatura per Zona
 ```bash
+echo -e "\n\033[1;31m[METRICS base2]  Media Temperatura per Zona \033[0m"
 curl -s -H "apikey: $API_KEY" \
   http://metrics.$IP.nip.io:$PORT/metrics/temperature/average-by-zone | jq
 ```
 
 #### Comando 3: Breakdown Allarmi per Severità
 ```bash
+echo -e "\n\033[1;31m[METRICS base3]  Breakdown Allarmi per Severità \033[0m"
 curl -s -H "apikey: $API_KEY" \
   http://metrics.$IP.nip.io:$PORT/metrics/alerts | jq
 ```
 
-#### Comando 4: Statistiche Firmware (Opzionale)
+#### Comando 4: Statistiche Firmware
 ```bash
+echo -e "\n\033[1;31m[METRICS base4]  Statistiche Firmware \033[0m"
 curl -s -H "apikey: $API_KEY" \
   http://metrics.$IP.nip.io:$PORT/metrics/firmware | jq
 ```
 
 #### Comando 5: Trend Attività Ultimi 7 Giorni
 ```bash
+echo -e "\n\033[1;31m[METRICS base5]  Trend Attività Ultimi 7 Giorni\033[0m"
 curl -s -H "apikey: $API_KEY" \
   http://metrics.$IP.nip.io:$PORT/metrics/activity/last7days | jq
 ```
@@ -189,6 +198,7 @@ curl -s -H "apikey: $API_KEY" \
 > "Iniziamo con lo scenario negativo: provo a contattare il Producer senza fornire alcuna API Key nell'header della richiesta."
 
 ```bash
+echo -e "\n\033[1;31m[SEC - AUTH 1]  Accesso Negato (Senza API Key)\033[0m"
 curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
   -H "Content-Type: application/json" \
   -d '{"device_id": "hacker-device", "zone_id": "unknown"}'
@@ -203,6 +213,7 @@ Output Atteso
 ##### Test Negativo: Accesso con API Key Errata
 > "Ora verifichiamo che anche fornendo un'API Key, se questa non è valida (non presente nel database di Kong), la richiesta venga comunque bloccata."
 ```bash
+echo -e "\n\033[1;31m[SEC - AUTH 2]  Accesso Negato con API Key Errata\033[0m"
 curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
   -H "apikey: bad-key-12345" \
   -H "Content-Type: application/json" \
@@ -216,9 +227,10 @@ Output Atteso
 > "Anche con un header 'apikey' presente, Kong ha verificato che la chiave 'bad-key-12345' non corrisponde a nessuna credenziale registrata nel Secret Kubernetes 'iot-devices-apikey', quindi ha respinto la richiesta con 'Invalid authentication credentials'."
 
 
-##### Test Positivo: Accesso Consentito (Con API Key Valida)
+##### Test Positivo: Accesso Consentito (con API Key Valida)
 > "Ora eseguiamo il test positivo: utilizziamo l'API Key corretta registrata nel sistema. La richiesta deve essere accettata e il payload deve essere processato dal Producer."
 ```bash
+echo -e "\n\033[1;31m[SEC - AUTH 3]  Accesso Consentito con API Key Valida\033[0m"
 curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
   -H "apikey: $API_KEY" \
   -H "Content-Type: application/json" \
@@ -251,6 +263,7 @@ HTTP/1.1 200 OK
 > "Il primo controllo valida che la connessione tra microservizi e broker Kafka avvenga su canale cifrato. Mi connetto direttamente a un pod del broker Kafka e utilizzo OpenSSL per ispezionare il protocollo TLS sulla porta 9093, che è la porta configurata per le connessioni sicure."
 
 ```bash
+echo -e "\n\033[1;31m[SEC - TLS] Comunicazione interna cifrata TLS\033[0m"
 kubectl exec -it -n kafka iot-sensor-cluster-broker-0 -- \
   openssl s_client -connect iot-sensor-cluster-kafka-bootstrap.kafka.svc.cluster.local:9093 -brief </dev/null
 ```
@@ -272,6 +285,7 @@ Ciphersuite: TLS_AES_256_GCM_SHA384
 
 ```bash
 # Visualizza il Secret del Consumer/Consumer (password in base64)
+echo -e "\n\033[1;31m[SEC - SASL/SCRAM] Autenticazione a Kafka tramite SASL/SCRAM\033[0m"
 kubectl get secret consumer-user -n kafka -o yaml | grep "password:"
 ```
 
@@ -283,14 +297,12 @@ kubectl get secret consumer-user -n kafka -o yaml | grep "password:"
 > "Completiamo la validazione della sicurezza verificando che anche le credenziali di MongoDB siano gestite tramite Secrets, non hardcoded."
 
 ```bash
-# 1. Verifica ConfigMap (parametri NON sensibili)
+echo -e "\n\033[1;31m[SEC - MongoDB] ConfigMap vs Secret\033[0m"
+
 echo "=== CONFIGMAP (Non Sensibili) ==="
 kubectl get configmap -n kafka mongodb-config -o yaml | grep "MONGO_"
-```
 
-```bash
-echo "=== SECRET (Sensibili) ==="
-# 2. Verifica Secret (credenziali SENSIBILI in base64)
+echo "=== SECRET (Sensibili, in base 64) ==="
 kubectl get secret -n kafka mongo-creds -o yaml | grep "MONGO_"
 ```
 
@@ -320,6 +332,7 @@ kubectl get secret -n kafka mongo-creds -o yaml | grep "MONGO_"
 > "Primo step: simulo un crash totale scalando il Consumer a zero repliche. Questo equivale a un guasto hardware del nodo che ospita il pod, o a un crash irrecuperabile del processo Python."
 
 ```bash
+echo -e "\n\033[1;31m[FAULT - 1] Crash Consumer\033[0m"
 kubectl scale deploy/consumer -n kafka --replicas=0
 ```
 
@@ -327,7 +340,7 @@ kubectl scale deploy/consumer -n kafka --replicas=0
 > "Ora invio 5 eventi di telemetria mentre il Consumer è offline. Questi messaggi verranno accettati dal Producer e bufferizzati su Kafka, ma non potranno essere consumati finché il worker non torna online."
 
 ```bash
-echo "Invio eventi durante downtime del Consumer..."
+echo -e "\n\033[1;31m[FAULT - 2] Invio eventi durante downtime consumer\033[0m"
 for i in {1..5}; do
   RESPONSE=$(curl -s -X POST http://producer.$IP.nip.io:$PORT/event/telemetry \
     -H "apikey: $API_KEY" \
@@ -345,6 +358,8 @@ echo "Completato invio di 5 eventi."
 #### **Step 3: Verifica Lag su Kafka (Opzionale - Dimostrativo)**
 > "Per dimostrare visivamente che i messaggi sono effettivamente bufferizzati su Kafka, possiamo interrogare il Consumer Group per vedere il lag - ovvero quanti messaggi sono in attesa di essere consumati."
 ```bash
+echo -e "\n\033[1;31m[FAULT - 3] Verifica Kafka LAG\033[0m"
+
 # Esegui all'interno di un pod broker Kafka per usare i tool di Kafka
 kubectl exec -it -n kafka iot-sensor-cluster-broker-0 -- \
   /opt/kafka/bin/kafka-consumer-groups.sh \
@@ -368,6 +383,8 @@ iot-consumer-group sensor-telemetry 2         10              11              1
 > "Ora simulo il ripristino del servizio riportando il Consumer a 1 replica. Kubernetes creerà un nuovo pod, che al boot richiederà gli offset committati al Consumer Group, e riprenderà la lettura esattamente dal punto in cui si era interrotto, processando tutti i messaggi accumulati."
 
 ```bash
+echo -e "\n\033[1;31m[FAULT - 4] Riavvio Consumer\033[0m"
+
 kubectl scale deploy/consumer -n kafka --replicas=1
 
 # Attendi che il pod sia ready
@@ -380,6 +397,7 @@ kubectl wait --for=condition=ready pod -l app=consumer -n kafka --timeout=60s
 
 **[APRIRE NUOVO TERMINALE - Tab 2]** - Monitoring Recovery
 ```bash
+echo -e "\n\033[1;31m[FAULT - 5] Controllo processamente messaggi bufferizzati\033[0m"
 # Mostra gli ultimi 20 log e segui in tempo reale
 kubectl logs -n kafka -l app=consumer -f --tail=20
 ```
@@ -411,6 +429,8 @@ kubectl logs -n kafka -l app=consumer -f --tail=20
 
 **[APRIRE NUOVO TERMINALE - Tab 3]** - Pod Watcher
 ```bash
+echo -e "\n\033[1;31m[HA - 1] Watcher/Monitoring per controllo stato pod\033[0m"
+
 kubectl get pods -n kafka -l app=producer -w
 ```
 
@@ -421,7 +441,8 @@ kubectl get pods -n kafka -l app=producer -w
 
 Comando: Kill Pod
 ```bash
-# Elimina automaticamente il primo pod del producer trovato
+echo -e "\n\033[1;31m[HA - 2] Simulazione crash: elimino un pod producer\033[0m"
+
 kubectl delete pod $(kubectl get pod -l app=producer -n kafka -o jsonpath="{.items[0].metadata.name}") -n kafka
 ```
 
@@ -470,6 +491,8 @@ producer-7d8f9c6b5d-xyz78   1/1     Running             0    18s
 > "Primo step: scalo manualmente i Deployment. Il Producer a 2 repliche per testare il Round-Robin HTTP, e il Consumer a 3 repliche per sfruttare completamente le 3 partizioni del topic 'sensor-telemetry'. Notate che scalare il Consumer a più di 3 repliche non aumenterebbe il throughput, perché ci sono solo 3 partizioni - le repliche extra rimarrebbero idle."
 
 ```bash
+echo -e "\n\033[1;31m[SCAL - 1] Scaling up replicas\033[0m"
+
 echo "=== SCALING PRODUCER TO 2 REPLICAS ==="
 kubectl scale deploy/producer -n kafka --replicas=2
 
@@ -495,7 +518,8 @@ kubectl get pods -n kafka -l "app in (producer, consumer)"
 > "Ora invio un burst di 50 richieste rapide senza delay tra una e l'altra. Questo carico elevato costringerà il Service Kubernetes a distribuire il traffico tra le 2 repliche del Producer, e i Producer invieranno messaggi a Kafka che verranno distribuiti sulle 3 partizioni e consumati dai 3 Consumer in parallelo."
 
 ```bash
-echo "=== BURST TEST: INVIO 50 RICHIESTE RAPIDE ==="
+echo -e "\n\033[1;31m[SCAL - 2] Burst: invio di 50 richieste rapide\033[0m"
+
 echo "Inizio: $(date +%H:%M:%S)"
 
 for i in {1..50}; do
@@ -519,6 +543,8 @@ echo "=== BURST COMPLETATO ==="
 > "Primo check: verifichiamo che il traffico HTTP sia stato distribuito tra le 2 repliche del Producer. Se il load balancing funziona, dovremmo vedere entrambi i pod nei log, con una distribuzione approssimativamente uniforme (circa 25 richieste ciascuno)."
 
 ```bash
+echo -e "\n\033[1;31m[SCAL - 3] Load Balancing Producer\033[0m"
+
 echo "=== DISTRIBUZIONE TRAFFICO TRA PRODUCER ==="
 echo ""
 echo "Pod 1:"
@@ -582,6 +608,8 @@ Totale: 50/50
 
 > "Ora verifichiamo il parallelismo lato Kafka. Con 3 partizioni e 3 repliche del Consumer, ogni replica dovrebbe aver letto da una partizione dedicata. Il Kafka Consumer Group protocol garantisce l'assegnazione esclusiva delle partizioni per evitare duplicazioni."
 ```bash
+echo -e "\n\033[1;31m[SCAL - 4] Load Balancing Consumer\033[0m"
+
 echo "=== DISTRIBUZIONE ELABORAZIONE TRA CONSUMER ==="
 echo ""
 
@@ -646,6 +674,8 @@ Consumer 3 - Prime 3 linee:
 > "Ora riporto il sistema allo stato iniziale con singola replica per liberare risorse per i test successivi."
 
 ```bash
+echo -e "\n\033[1;31m[SCAL - 5] Restore Replicas\033[0m"
+
 echo "=== RESTORE TO SINGLE REPLICA ==="
 kubectl scale deploy/producer -n kafka --replicas=1
 kubectl scale deploy/consumer -n kafka --replicas=1
@@ -689,6 +719,8 @@ kubectl get pods -n kafka -l "app in (producer, consumer)"
 > "Primo step: applico il manifest dell'HPA che configura le policy di scaling per Producer, Consumer e Metrics Service."
 
 ```bash
+echo -e "\n\033[1;31m[ELAS - 1] HPA Deploym\033[0m"
+
 kubectl apply -f ./K8s/hpa.yaml
 
 # Attendi che l'HPA sia operativo
@@ -708,7 +740,8 @@ kubectl get hpa -n metrics
 > "Ora genero un carico pesante per saturare la CPU. Invio 5000 richieste consecutive, che dovrebbero far salire l'utilizzo CPU ben oltre il 50% e triggerare l'autoscaling."
 
 ```bash
-echo "=== STRESS TEST STARTED ==="
+echo -e "\n\033[1;31m[ELAS - 2] Burst/Stress Test\033[0m"
+
 echo "Inviando 5000 richieste per saturare la CPU..."
 echo "Inizio: $(date +%H:%M:%S)"
 echo ""
@@ -737,11 +770,12 @@ echo "=== STRESS TEST COMPLETATO ==="
 
 **[APRIRE NUOVO TERMINALE - Tab 5]** - HPA Live Monitoring
 ```bash
-# Monitoring continuo con refresh ogni secondo
+echo -e "\n\033[1;31m[ELAS - 3] HPA Live Monitoring (refresh)\033[0m"
 watch -n 1 'kubectl get hpa -n kafka'
 ```
 
 ```bash
+echo -e "\n\033[1;31m[ELAS - 3] HPA Live Monitoring\033[0m"
 kubectl get hpa -n kafka -w
 ```
 
@@ -772,6 +806,8 @@ kubectl get hpa -n kafka -w
 > "Ora rimuovo la configurazione HPA per ripristinare il controllo manuale delle repliche e liberare risorse per il test finale di Rate Limiting."
 
 ```bash
+echo -e "\n\033[1;31m[ELAS - 4] HPA Cleanup (refresh)\033[0m"
+
 kubectl delete -f K8s/hpa.yaml
 
 # Verifica rimozione
@@ -806,6 +842,8 @@ kubectl get hpa -A
 > "Primo step: creo un KongPlugin di tipo 'rate-limiting' che limita a 5 richieste al secondo. La policy è 'local', quindi ogni istanza di Kong conta autonomamente (in produzione si userebbe 'cluster' con Redis per condividere i contatori tra repliche)."
 
 ```bash
+echo -e "\n\033[1;31m[RATEL - 1] Rate Limiting Plugin Deploy\033[0m"
+
 cat <<'YAML' | kubectl apply -f -
 apiVersion: configuration.konghq.com/v1
 kind: KongPlugin
@@ -827,6 +865,8 @@ kubectl get kongplugin -n kafka global-rate-limit
 > "Patch l'Ingress per aggiungere il rate limiting alla pipeline di plugin già esistente."
 
 ```bash
+echo -e "\n\033[1;31m[RATEL - 2] Patch Ingress con plugin\033[0m"
+
 kubectl patch ingress producer-ingress -n kafka \
   -p '{"metadata":{"annotations":{"konghq.com/plugins":"key-auth, global-rate-limit"}}}'
 ```
@@ -841,6 +881,8 @@ kubectl patch ingress producer-ingress -n kafka \
 > "Ora eseguo un flood test: 20 richieste inviate il più velocemente possibile senza delay. Questo simula un attacco DoS o un bug client-side che genera richieste infinite."
 
 ```bash
+echo -e "\n\033[1;31m[RATEL - 3] Flood/Dos test\033[0m"
+
 echo ""
 echo "=== FLOOD TEST (20 richieste rapide - SOPRA SOGLIA) ==="
 echo "Inizio: $(date +%H:%M:%S.%3N)"
@@ -887,6 +929,8 @@ echo "  Totale: $((SUCCESS_COUNT + THROTTLED_COUNT))/20"
 > "Ora rimuovo il plugin di rate limiting per ripristinare il normale funzionamento del sistema, mantenendo solo l'autenticazione API Key."
 
 ```bash
+echo -e "\n\033[1;31m[RATEL - 4] Rate Limiting Cleanup\033[0m"
+
 # Rimuovi il plugin
 kubectl delete kongplugin -n kafka global-rate-limit --ignore-not-found
 
