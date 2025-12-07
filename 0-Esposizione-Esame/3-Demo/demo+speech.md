@@ -144,7 +144,6 @@ curl -s -X POST http://producer.$IP.nip.io:$PORT/event/firmware_update \
 ```
 
 **[CHIUDERE Tab 1 - Logs Consumer]**
-> Premere `CTRL+C` per terminare il comando `kubectl logs -f`
 
 ### LETTURA / ANALITICHE Metrics Service
 > "Il Metrics Service espone diverse API per l'analisi dei dati.
@@ -154,16 +153,12 @@ curl -s -X POST http://producer.$IP.nip.io:$PORT/event/firmware_update \
 curl -s -H "apikey: $API_KEY" \
   http://metrics.$IP.nip.io:$PORT/metrics/boots | jq
 ```
-> "Il sistema ha registrato correttamente 2 eventi di boot (sensor-01 e sensor-02)."
 
 #### Comando 2: Media Temperatura per Zona
 ```bash
 curl -s -H "apikey: $API_KEY" \
   http://metrics.$IP.nip.io:$PORT/metrics/temperature/average-by-zone | jq
 ```
-
-> "Il Metrics Service ha eseguito un'aggregation pipeline su MongoDB e ha calcolato le medie.
-> Questa query sfrutta gli indici clustered automatici delle Time Series Collection, garantendo performance elevate anche su dataset molto grandi."
 
 #### Comando 3: Breakdown Allarmi per Severità
 ```bash
@@ -176,7 +171,6 @@ curl -s -H "apikey: $API_KEY" \
 curl -s -H "apikey: $API_KEY" \
   http://metrics.$IP.nip.io:$PORT/metrics/firmware | jq
 ```
-
 
 #### Comando 5: Trend Attività Ultimi 7 Giorni
 ```bash
@@ -231,7 +225,7 @@ curl -i -X POST http://producer.$IP.nip.io:$PORT/event/boot \
   -d '{"device_id": "test-sensor", "zone_id": "lab", "firmware": "v1.0"}'
 ```
 
-##### Output Atteso
+Output Atteso
 ```http
 HTTP/1.1 200 OK
 {

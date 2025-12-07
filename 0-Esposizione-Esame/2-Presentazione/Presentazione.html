@@ -833,14 +833,13 @@ config:
                 <div style="margin-bottom: 15px;">
                     <strong style="color: white; display: block; margin-bottom: 5px; font-size: 20px;">PARTE 1: Test Base</strong>
                     <ul style="font-size: 18px; list-style: disc; padding-left: 20px;">
-                        <li>Auth Check (401 vs 200)</li>
                         <li>Pipeline completa: Invio eventi + Lettura Metriche</li>
                     </ul>
                 </div>
                 <div>
                     <strong style="color: white; display: block; margin-bottom: 5px; font-size: 20px;">PARTE 2: NFP Validation</strong>
                     <ol style="font-size: 18px; list-style: decimal; padding-left: 20px;">
-                        <li><strong>Security:</strong> TLS Verification + SASL + API key</li>
+                        <li><strong>Security:</strong> Auth(API key) + TLS Verification + SASL + Mongo</li>
                         <li><strong>Fault Tolerance:</strong> Consumer Crash & Recovery (Buffering)</li>
                         <li><strong>HA:</strong> Pod Kill & Self-Healing</li>
                         <li><strong>Scalability:</strong> Manual Scale Out & LB</li>
