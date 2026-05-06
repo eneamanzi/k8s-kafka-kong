@@ -1,5 +1,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+[English version](README.en.md) | **Versione Italiana**
 # Progetto Kubernetes per il corso CCT
 
 L'obiettivo è implementare un'architettura a microservizi su Kubernetes per il monitoraggio di una rete di sensori IoT. Il sistema gestisce flussi di telemetria ad alta frequenza tramite **Kafka** (su topic differenziati per priorità), storicizza i dati su **MongoDB** (utilizzando collezioni Time Series ottimizzate) ed espone metriche aggregate tramite **Kong**. L'autenticazione dei dispositivi è gestita tramite **API Key**.
